@@ -3,6 +3,7 @@ from .device import resolve_device, training_kwargs_for_device
 from .data import load_dataset_from_csv, load_sample_dataset
 from .train import train
 from .inference import Classifier
+from .embed_probe import ProbeResult, encode_texts, linear_probe
 
 __all__ = [
     "Config",
@@ -12,4 +13,7 @@ __all__ = [
     "load_sample_dataset",
     "train",
     "Classifier",
+    "ProbeResult",
+    "encode_texts",
+    "linear_probe",
 ]
