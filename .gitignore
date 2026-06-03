@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+crime_classifier/
+runs/
+wandb/
+*.egg-info/
+dist/
+build/
+.uv-cache/
