@@ -30,10 +30,10 @@ dependencies = [
 
 [project.optional-dependencies]
 # Local zero-shot LLM via AirLLM. Quantization (bitsandbytes) is CUDA-only.
-airllm = ["airllm>=2.11"]
-airllm-cuda = ["airllm>=2.11", "bitsandbytes>=0.43", "accelerate>=1.0"]
+airllm = ["airllm>=2.11", "optimum>=1.13,<1.21"]
+airllm-cuda = ["airllm>=2.11", "bitsandbytes>=0.43", "accelerate>=1.0", "optimum>=1.13,<1.21"]
 # Mac MLX backend for AirLLM (auto-used on Darwin).
-airllm-mlx = ["airllm>=2.11", "mlx>=0.18"]
+airllm-mlx = ["airllm>=2.11", "mlx>=0.18", "optimum>=1.13,<1.21"]
 # Anthropic Claude API.
 anthropic = ["anthropic>=0.40"]
 
