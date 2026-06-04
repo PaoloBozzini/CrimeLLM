@@ -82,7 +82,13 @@ class ZeroShotResult:
     error: str | None = None
 
 
-def _parse(raw: str, labels: Iterable[str]) -> tuple[str, float, str]:
+def _parse(raw: str, labels: Iterable[str]) -> tuple[str, float, str, str]:
+    """Parse first JSON object out of `raw`.
+
+    Returns (label, confidence, reasoning, clean_raw) where `clean_raw` is the
+    substring containing only the first JSON object — strips run-on prose /
+    repeated objects that some local LLMs emit past EOS.
+    """
     labels = tuple(labels)
 
     # Tolerate models that wrap JSON in ```json ... ``` fences.
@@ -96,7 +102,8 @@ def _parse(raw: str, labels: Iterable[str]) -> tuple[str, float, str]:
     start = s.find("{")
     if start == -1:
         raise json.JSONDecodeError("no JSON object found", s, 0)
-    data, _end = json.JSONDecoder().raw_decode(s[start:])
+    data, end = json.JSONDecoder().raw_decode(s[start:])
+    clean_raw = s[start : start + end]
     label = str(data.get("label", "unclear")).lower().strip()
     if label not in labels:
         label = "unclear"
@@ -106,7 +113,7 @@ def _parse(raw: str, labels: Iterable[str]) -> tuple[str, float, str]:
         conf = 0.0
     conf = max(0.0, min(1.0, conf))
     reasoning = str(data.get("reasoning", "")).strip()
-    return label, conf, reasoning
+    return label, conf, reasoning, clean_raw
 
 
 class OllamaClassifier:
@@ -152,8 +159,8 @@ class OllamaClassifier:
             r = requests.post(f"{self.host}/api/chat", json=payload, timeout=self.timeout)
             r.raise_for_status()
             raw = r.json()["message"]["content"]
-            label, conf, reasoning = _parse(raw, self.labels)
-            return ZeroShotResult(label=label, confidence=conf, reasoning=reasoning, raw=raw)
+            label, conf, reasoning, clean = _parse(raw, self.labels)
+            return ZeroShotResult(label=label, confidence=conf, reasoning=reasoning, raw=clean)
         except Exception as e:  # noqa: BLE001
             return ZeroShotResult(
                 label="unclear",
@@ -189,7 +196,7 @@ class AirLLMClassifier:
         self,
         model_id: str = "Qwen/Qwen2.5-7B-Instruct",
         compression: str | None = "4bit",   # "4bit" | "8bit" | None — CUDA only
-        max_new_tokens: int = 200,
+        max_new_tokens: int = 120,
         max_input_tokens: int = 2048,
         labels: Iterable[str] = DEFAULT_LABELS,
         device: str | None = None,          # "cuda" | "mlx" | "cpu"; auto if None
@@ -303,8 +310,8 @@ class AirLLMClassifier:
 
 
             try:
-                label, conf, reasoning = _parse(raw, self.labels)
-                return ZeroShotResult(label=label, confidence=conf, reasoning=reasoning, raw=raw)
+                label, conf, reasoning, clean = _parse(raw, self.labels)
+                return ZeroShotResult(label=label, confidence=conf, reasoning=reasoning, raw=clean)
             except Exception as e:  # noqa: BLE001
                 return ZeroShotResult(
                     label="unclear",
