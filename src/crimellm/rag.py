@@ -85,10 +85,10 @@ class LegalRetriever:
         base_path = Path(base_path)
         base_path.parent.mkdir(parents=True, exist_ok=True)
         faiss.write_index(index, str(base_path) + ".faiss")
-        with open(str(base_path) + ".jsonl", "w") as f:
+        with open(str(base_path) + ".jsonl", "w", encoding="utf-8") as f:
             for d in documents:
                 f.write(json.dumps(d, ensure_ascii=False) + "\n")
-        with open(str(base_path) + ".meta.json", "w") as f:
+        with open(str(base_path) + ".meta.json", "w", encoding="utf-8") as f:
             json.dump({"embedding_model": embedding_model, "dim": dim}, f)
 
         return cls(index, list(documents), embedding_model, top_k=top_k, _model=model)
@@ -103,12 +103,12 @@ class LegalRetriever:
         base_path = Path(base_path)
         index = faiss.read_index(str(base_path) + ".faiss")
         records: list[dict[str, Any]] = []
-        with open(str(base_path) + ".jsonl") as f:
+        with open(str(base_path) + ".jsonl", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if line:
                     records.append(json.loads(line))
-        with open(str(base_path) + ".meta.json") as f:
+        with open(str(base_path) + ".meta.json", encoding="utf-8") as f:
             meta = json.load(f)
         if len(records) != index.ntotal:
             raise ValueError(

@@ -1,4 +1,4 @@
-"""Legal-corpus ingestion → JSONL.
+"""Legal-corpus ingestion -> JSONL.
 
 Each record:
   {id, text, source, citation, type: "statute"|"judgment", metadata}
@@ -6,7 +6,7 @@ Each record:
 Sources:
   - US Code via govinfo.gov (API or direct content URLs).
   - US Code via local USLM XML (manual download from uscode.house.gov).
-  - CourtListener REST v4 (/search/?type=o → /opinions/{id}/ two-hop).
+  - CourtListener REST v4 (/search/?type=o -> /opinions/{id}/ two-hop).
   - UK legislation.gov.uk (Acts of Parliament, whole-act XML).
 
 CLI:
@@ -64,14 +64,14 @@ def _ws(s: str | None) -> str:
 
 def _write_jsonl(records: list[dict[str, Any]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         for r in records:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
 def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
     """Read a JSONL corpus file produced by the ingestion helpers."""
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 
 
@@ -87,7 +87,7 @@ def _get_with_retry(
         r = client.get(url, params=params, timeout=60.0)
         if r.status_code == 429 and attempt < max_retries:
             wait = float(r.headers.get("Retry-After") or 2 ** attempt)
-            tqdm.write(f"[corpora] 429 on {url} — sleep {wait}s (attempt {attempt+1})")
+            tqdm.write(f"[corpora] 429 on {url} -- sleep {wait}s (attempt {attempt+1})")
             time.sleep(wait)
             continue
         r.raise_for_status()
@@ -252,7 +252,7 @@ def fetch_us_code_sections(
                 records.append(_usc_record(gid, title, year, heading, body))
     out = Path(str(base_path) + ".jsonl")
     _write_jsonl(records, out)
-    print(f"[corpora] wrote {len(records)} records → {out}")
+    print(f"[corpora] wrote {len(records)} records -> {out}")
     return len(records)
 
 
@@ -303,7 +303,7 @@ def download_us_code(
                                                    heading or g.get("title", ""), body))
 
     _write_jsonl(records, out)
-    print(f"[corpora] wrote {len(records)} records → {out}")
+    print(f"[corpora] wrote {len(records)} records -> {out}")
     return len(records)
 
 
@@ -365,7 +365,7 @@ def download_courtlistener(
     max_chars: int = 8000,
     pacing_seconds: float = 0.4,
 ) -> int:
-    """Two-hop CL ingest: /search/?type=o ranks + metadata → /opinions/{id}/ body.
+    """Two-hop CL ingest: /search/?type=o ranks + metadata -> /opinions/{id}/ body.
 
     Falls back to snippet-only when no token is set. Token comes from arg or
     `COURTLISTENER_API_TOKEN` env (via .env). Honors 429 with backoff + Retry-After.
@@ -380,7 +380,7 @@ def download_courtlistener(
 
     fetch_bodies = bool(full_bodies and api_token)
     if full_bodies and not api_token:
-        print("[corpora] no COURTLISTENER_API_TOKEN — snippets only.")
+        print("[corpora] no COURTLISTENER_API_TOKEN -- snippets only.")
 
     params: dict | None = {"type": "o", "q": query, "page_size": page_size, "order_by": order_by}
     if court:
@@ -400,7 +400,7 @@ def download_courtlistener(
                             data = _get_with_retry(client, f"{COURTLISTENER_API}/opinions/{op_id}/").json()
                             body, op_meta = _opinion_text(data), data
                         except httpx.HTTPStatusError as e:
-                            print(f"[corpora] /opinions/{op_id} → {e.response.status_code}; snippet")
+                            print(f"[corpora] /opinions/{op_id} -> {e.response.status_code}; snippet")
                         if pacing_seconds > 0:
                             time.sleep(pacing_seconds)
 
@@ -416,7 +416,7 @@ def download_courtlistener(
 
     _write_jsonl(records, out)
     fb = sum(1 for r in records if r["metadata"]["fetched_full_body"])
-    print(f"[corpora] wrote {len(records)} records ({fb} with full body) → {out}")
+    print(f"[corpora] wrote {len(records)} records ({fb} with full body) -> {out}")
     return len(records)
 
 
@@ -476,7 +476,7 @@ def download_uk_legislation(
     = Fraud Act 2006. Pulls one whole-act XML per Act (CLML schema), iterates
     `<P1>` sections, and writes one record per section.
 
-    Open Government Licence — no key, no rate limit. ~1 HTTP request per Act.
+    Open Government Licence -- no key, no rate limit. ~1 HTTP request per Act.
     """
     statutes = list(statutes)
     records: list[dict[str, Any]] = []
@@ -495,7 +495,7 @@ def download_uk_legislation(
 
     out = Path(str(base_path) + ".jsonl")
     _write_jsonl(records, out)
-    print(f"[corpora] wrote {len(records)} records from {len(statutes)} Acts → {out}")
+    print(f"[corpora] wrote {len(records)} records from {len(statutes)} Acts -> {out}")
     return len(records)
 
 
