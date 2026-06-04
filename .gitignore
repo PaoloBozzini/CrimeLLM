@@ -10,3 +10,6 @@ wandb/
 dist/
 build/
 .uv-cache/
+data/corpora/
+.env
+.env.local

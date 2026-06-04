@@ -13,9 +13,12 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 import requests
+
+if TYPE_CHECKING:
+    from .rag import LegalRetriever, RetrievalHit
 
 DEFAULT_LABELS = ("no", "yes", "unclear")
 
@@ -116,6 +119,33 @@ def _parse(raw: str, labels: Iterable[str]) -> tuple[str, float, str, str]:
     return label, conf, reasoning, clean_raw
 
 
+def _format_context(hits: "list[RetrievalHit]", max_chars_per_hit: int = 600) -> str:
+    """Format retrieved hits as a numbered context block for the user message."""
+    if not hits:
+        return ""
+    lines: list[str] = ["Relevant legal context (retrieved):"]
+    for i, h in enumerate(hits, start=1):
+        snippet = h.text.strip().replace("\n", " ")
+        if len(snippet) > max_chars_per_hit:
+            snippet = snippet[: max_chars_per_hit - 1].rstrip() + "…"
+        cite = h.citation or h.source or "source"
+        lines.append(f"[{i}] ({cite}): \"{snippet}\"")
+    return "\n".join(lines)
+
+
+def _user_message_with_context(text: str, retriever: "LegalRetriever | None") -> str:
+    if retriever is None:
+        return text
+    hits = retriever.retrieve(text)
+    ctx = _format_context(hits)
+    if not ctx:
+        return text
+    return (
+        f"{ctx}\n\n"
+        f"Using the legal context above where relevant, classify this text:\n\n{text}"
+    )
+
+
 class OllamaClassifier:
     """Zero-shot crime classifier backed by a local Ollama model.
 
@@ -134,20 +164,23 @@ class OllamaClassifier:
         labels: Iterable[str] = DEFAULT_LABELS,
         temperature: float = 0.0,
         timeout: int = 120,
+        retriever: "LegalRetriever | None" = None,
     ):
         self.model = model
         self.host = host.rstrip("/")
         self.labels = tuple(labels)
         self.temperature = temperature
         self.timeout = timeout
+        self.retriever = retriever
         self.schema = build_output_schema(self.labels)
 
     def classify(self, text: str) -> ZeroShotResult:
+        user_content = _user_message_with_context(text, self.retriever)
         payload = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": text},
+                {"role": "user", "content": user_content},
             ],
             "stream": False,
             # JSON Schema constrained decoding (Ollama >= 0.5). Guarantees the
@@ -200,6 +233,7 @@ class AirLLMClassifier:
         max_input_tokens: int = 2048,
         labels: Iterable[str] = DEFAULT_LABELS,
         device: str | None = None,          # "cuda" | "mlx" | "cpu"; auto if None
+        retriever: "LegalRetriever | None" = None,
     ):
         try:
             from airllm import AutoModel  # noqa: F401
@@ -236,6 +270,7 @@ class AirLLMClassifier:
         self.max_input_tokens = max_input_tokens
         self.device = device
         self.model_id = model_id
+        self.retriever = retriever
 
         # Lazy-import the array library matching the backend.
         if self.device == "mlx":
@@ -249,8 +284,12 @@ class AirLLMClassifier:
         # prompt as an explicit JSON shape — instruction-tuned models follow it
         # and `_parse` tolerates minor wrapping (fences, whitespace).
         schema = build_output_schema(self.labels)
+        if self.retriever is None:
+            body = f"Classify this text:\n\n{text}"
+        else:
+            body = _user_message_with_context(text, self.retriever)
         user_block = (
-            f"Classify this text:\n\n{text}\n\n"
+            f"{body}\n\n"
             f"Respond with ONE JSON object matching this schema (no prose, no fences):\n"
             f"{json.dumps(schema)}"
         )
@@ -351,6 +390,7 @@ class AnthropicClassifier:
         model: str = "claude-haiku-4-5-20251001",
         labels: Iterable[str] = DEFAULT_LABELS,
         max_tokens: int = 300,
+        retriever: "LegalRetriever | None" = None,
     ):
         try:
             import anthropic  # noqa: F401
@@ -359,13 +399,19 @@ class AnthropicClassifier:
                 "anthropic package not installed. Run: uv add anthropic"
             ) from e
         if not os.environ.get("ANTHROPIC_API_KEY"):
-            raise RuntimeError("ANTHROPIC_API_KEY env var not set")
+            from .env import load_env
+            load_env()
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY env var not set. Put it in a `.env` file or export it."
+            )
         import anthropic
 
         self.client = anthropic.Anthropic()
         self.model = model
         self.labels = tuple(labels)
         self.max_tokens = max_tokens
+        self.retriever = retriever
         self.schema = build_output_schema(self.labels)
         self._tool = {
             "name": self.TOOL_NAME,
@@ -395,7 +441,12 @@ class AnthropicClassifier:
                 # Force the model to use OUR tool → output is schema-validated
                 # by Anthropic before we ever see it. No JSON parsing failures.
                 tool_choice={"type": "tool", "name": self.TOOL_NAME},
-                messages=[{"role": "user", "content": text}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": _user_message_with_context(text, self.retriever),
+                    }
+                ],
             )
             # Extract the tool_use block. With forced tool_choice it must exist.
             data = None

@@ -19,6 +19,11 @@ dependencies = [
     "sentencepiece>=0.2",
     "protobuf>=5.0",
     "sentence-transformers>=3.2",
+    "faiss-cpu>=1.8",
+    "lxml>=5",
+    "httpx>=0.27",
+    "tqdm>=4.66",
+    "python-dotenv>=1.2.2",
 ]
 
 [project.optional-dependencies]
