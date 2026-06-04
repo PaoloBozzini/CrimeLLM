@@ -1,9 +1,11 @@
 [project]
 name = "crimellm"
 version = "0.1.0"
-description = "Fine-tune an encoder (InLegalBERT) into a 3-class crime classifier."
+description = "3-class crime classifier (fine-tune + zero-shot LLM) with RAG over US/UK statutes and case law."
 requires-python = ">=3.10,<3.13"
 readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Paolo Bozzini" }]
 dependencies = [
     "transformers>=4.46",
     "datasets>=3.0",

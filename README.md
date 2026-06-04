@@ -1,76 +1,160 @@
 # CrimeLLM
 
-Fine-tune an encoder (default: `law-ai/InLegalBERT`) into a 3-class classifier on the "is this memory a crime?" axis (`no` / `yes` / `unclear`). For a second axis (e.g. ethical good/bad), train a **separate** model with the same code by swapping the dataset — don't share a head.
+Three-class crime classifier (`no` / `yes` / `unclear`) for short text snippets. Bundles three independent paths in one `uv` package:
 
-## Layout
+1. **Fine-tune** — `law-ai/InLegalBERT` (or any HF encoder) + a 3-class head.
+2. **Zero-shot LLM** — uniform `classify(text)` API over three backends:
+   - `OllamaClassifier` (local, JSON-schema constrained decoding)
+   - `AnthropicClassifier` (Claude API, forced tool-use for schema enforcement, prompt caching)
+   - `AirLLMClassifier` (layer-by-layer disk offload; MLX on Mac, CUDA + bitsandbytes on NVIDIA)
+3. **RAG** — `LegalRetriever` (FAISS + BGE-small) over a corpus you build from:
+   - **US Code** (Title 18 — criminal code) via govinfo.gov
+   - **UK Acts of Parliament** (Fraud Act, Theft Act, Bribery Act, …) via legislation.gov.uk
+   - **CourtListener** judgments (federal/state case law) via REST v4
 
-```
-.
-├── pyproject.toml          # uv project + cross-platform torch sources
-├── .python-version         # 3.11
-├── src/crimellm/           # importable package
-│   ├── config.py           # hyperparams
-│   ├── device.py           # CUDA / MPS / CPU auto-detect
-│   ├── data.py             # CSV + built-in sample loader
-│   ├── train.py            # train() entrypoint
-│   └── inference.py        # Classifier wrapper
-├── notebooks/finetune.ipynb
-├── data/sample.csv
-└── legacy/finetune_classifier.py   # original single-file script
-```
+Plus a frozen-embedding linear probe (`embed_probe.py`) for quick base-model bake-offs.
 
 ## Setup
 
 Install [uv](https://docs.astral.sh/uv/), then from the project root:
 
-### macOS (Apple Silicon — MPS)
+```bash
+uv sync                       # core: transformers, faiss, sentence-transformers, ...
+uv sync --extra airllm        # optional: AirLLM zero-shot backend
+uv sync --extra airllm-mlx    # optional: Mac MLX backend for AirLLM
+uv sync --extra airllm-cuda   # optional: NVIDIA + 4/8-bit (bitsandbytes)
+uv sync --extra anthropic     # optional: Claude API backend
+```
+
+Cross-platform PyTorch: macOS gets MPS-ready PyPI wheel; Windows auto-routes to the CUDA 12.1 index via `[tool.uv.sources]`. Edit `pyproject.toml` if you need another CUDA version.
+
+### Secrets (`.env`)
 
 ```bash
-uv sync
+cp .env.example .env
+# fill in any of:
+#   COURTLISTENER_API_TOKEN=...   (free at courtlistener.com)
+#   GOVINFO_API_KEY=...           (free at api.data.gov; "DEMO_KEY" works at 30/hr)
+#   ANTHROPIC_API_KEY=...         (console.anthropic.com)
 ```
 
-Default PyPI `torch` wheel ships MPS support. Auto-detected at runtime.
+Downloaders and `AnthropicClassifier` auto-load `.env` via `crimellm.load_env()` — no code change needed.
 
-### Windows + NVIDIA (CUDA 12.1)
+## Quickstart
 
-```powershell
-uv sync
+### Zero-shot, no training
+
+```python
+from crimellm import AnthropicClassifier
+clf = AnthropicClassifier()
+clf.classify("he broke into the shop at night and stole money from the till")
+# ZeroShotResult(label='yes', confidence=1.0, reasoning='theft / burglary')
 ```
 
-`pyproject.toml` already routes `torch` to the PyTorch CUDA 12.1 index **on `sys_platform == 'win32'`** via `[tool.uv.sources]`, so the right wheel is fetched automatically. If you need a different CUDA, edit the `[[tool.uv.index]]` URL (e.g. `cu118`, `cu124`) in `pyproject.toml`.
+### Zero-shot with RAG context
 
-### Linux / CPU
+```python
+from crimellm import (
+    LegalRetriever, AirLLMClassifier, UK_CRIMINAL_ACTS,
+    fetch_us_code_sections, download_courtlistener, download_uk_legislation, load_jsonl,
+)
 
-Plain `uv sync` gives the CPU/CUDA-on-linux PyPI wheel.
+# 1. Build a corpus (one-time)
+fetch_us_code_sections("data/corpora/usc18", [
+    "USCODE-2023-title18-partI-chap51-sec1111",   # Murder
+    "USCODE-2023-title18-partI-chap103-sec2113",  # Bank robbery
+    "USCODE-2023-title18-partI-chap63-sec1341",   # Mail fraud
+])
+download_uk_legislation("data/corpora/uk", statutes=UK_CRIMINAL_ACTS)
+download_courtlistener("data/corpora/cl", max_docs=50)
 
-## Run
+# 2. Index it (FAISS + BGE-small)
+records = (
+    load_jsonl("data/corpora/usc18.jsonl")
+    + load_jsonl("data/corpora/uk.jsonl")
+    + load_jsonl("data/corpora/cl.jsonl")
+)
+LegalRetriever.build(records, "data/corpora/legal")
 
-### Jupyter notebook
+# 3. Classify with retrieved context
+retriever = LegalRetriever.load("data/corpora/legal")
+clf = AirLLMClassifier(model_id="Qwen/Qwen2.5-7B-Instruct", retriever=retriever)
+clf.classify("she defrauded investors with false statements about finances")
+# reasoning will cite Fraud Act 2006 s.2 / 18 U.S.C. § 1341 / similar judgments
+```
+
+### Fine-tune
+
+```python
+from crimellm import load_sample_dataset, train, Config, Classifier
+res = train(load_sample_dataset(), Config())
+Classifier(res.tokenizer, res.model).classify("he stole the car")
+```
+
+### CLI
+
+```bash
+# Ingest corpora
+python -m crimellm.corpora us-code       --out data/corpora/usc18
+python -m crimellm.corpora uk            --out data/corpora/uk
+python -m crimellm.corpora courtlistener --out data/corpora/cl --max-docs 100
+```
+
+### Notebooks
 
 ```bash
 uv run python -m ipykernel install --user --name crimellm --display-name "CrimeLLM (uv)"
-uv run jupyter lab notebooks/finetune.ipynb
+uv run jupyter lab notebooks/
 ```
 
-Pick the **CrimeLLM (uv)** kernel.
+- `finetune.ipynb` — train + evaluate the InLegalBERT classifier
+- `base_model_bakeoff.ipynb` — macro-F1 across candidate base models
+- `embedding_probe.ipynb` — frozen-embedding + logistic regression probe
+- `zero_shot_llm.ipynb` — Ollama / Anthropic / AirLLM comparison
+- `rag_demo.ipynb` — full pipeline: ingest USC + UK + CL → FAISS → classify with vs. without RAG
 
-### Script
+## Package layout
 
-```bash
-uv run python -c "from crimellm import load_sample_dataset, train, Config; train(load_sample_dataset(), Config())"
+```
+src/crimellm/
+├── config.py         hyperparams (Config dataclass)
+├── device.py         CUDA / MPS / CPU auto-detect, per-backend training kwargs
+├── env.py            .env loader (load_env, find_dotenv)
+├── data.py           CSV + built-in sample loader
+├── train.py          fine-tune entrypoint (transformers.Trainer)
+├── inference.py      Classifier wrapper for fine-tuned model
+├── embed_probe.py    sentence-transformers + sklearn linear probe
+├── zero_shot.py      OllamaClassifier, AnthropicClassifier, AirLLMClassifier
+├── rag.py            LegalRetriever (FAISS IndexFlatIP), RetrievalHit
+└── corpora.py        download_us_code, fetch_us_code_sections,
+                      download_courtlistener, download_uk_legislation,
+                      download_bailii (stub), parse_us_code, load_jsonl
 ```
 
 ## Data format
 
-CSV with two columns:
+Training CSV — two columns:
 
 | column | type | meaning |
-|--------|------|---------|
-| text   | str  | the memory / sentence |
-| label  | int  | 0 = no, 1 = yes, 2 = unclear |
+|---|---|---|
+| `text` | str | the memory / sentence |
+| `label` | int | 0 = no, 1 = yes, 2 = unclear |
 
 See `data/sample.csv`.
 
+Corpus JSONL — one record per line:
+
+```json
+{"id": str, "text": str, "source": "us_code"|"uk_legislation"|"courtlistener",
+ "citation": str, "type": "statute"|"judgment", "metadata": {...}}
+```
+
 ## Device handling
 
-`crimellm.device.resolve_device()` picks **CUDA → MPS → CPU**. `training_kwargs_for_device()` then injects per-backend `TrainingArguments` (bf16/fp16 on NVIDIA, fp32 on MPS, disables `pin_memory` off-CUDA).
+`crimellm.device.resolve_device()` picks **CUDA → MPS → CPU**. `training_kwargs_for_device()` injects per-backend `TrainingArguments` (bf16/fp16 on NVIDIA, fp32 on MPS, disables `pin_memory` off-CUDA). `AirLLMClassifier` routes to MLX on Darwin and to CUDA elsewhere.
+
+## License
+
+MIT — see `LICENSE`.
+
+Source corpora retain their own licences: US Code is public domain (OLRC), UK legislation is Open Government Licence v3.0, CourtListener opinions are CC0 / public domain.
