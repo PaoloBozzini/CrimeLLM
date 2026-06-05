@@ -5,11 +5,12 @@ vectors (sentence-transformers, BGE, E5, Qwen3-Embedding, ...), encoding once
 and fitting a small classifier on top is usually faster, lighter on memory,
 and competitive-or-better than fine-tuning a transformer head on small data.
 """
+
 from __future__ import annotations
 
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
@@ -84,9 +85,9 @@ def linear_probe(
         embed_seconds = time.time() - t0
 
         t1 = time.time()
-        clf = LogisticRegression(
-            max_iter=2000, class_weight="balanced", C=C, n_jobs=None
-        ).fit(X_train, train_labels)
+        clf = LogisticRegression(max_iter=2000, class_weight="balanced", C=C, n_jobs=None).fit(
+            X_train, train_labels
+        )
         fit_seconds = time.time() - t1
 
         y_pred = clf.predict(X_eval)

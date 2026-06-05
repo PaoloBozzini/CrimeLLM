@@ -1,10 +1,15 @@
-"""Batched UNWIND MERGE loaders. Idempotent under re-runs."""
+"""Batched UNWIND MERGE loaders. Idempotent under re-runs.
+
+Row dicts come from ``models.*.to_neo4j_props()`` (see ``clg.models``). Add a
+new field to a dataclass and these loaders pick it up automatically.
+"""
+
 from __future__ import annotations
 
-from dataclasses import asdict
-from typing import Any, Iterable, Iterator
+from collections.abc import Iterable, Iterator
+from typing import Any
 
-from ..models import Case, Citation, Court
+from ..models import Case, Citation, Court, Provenance
 from .driver import Neo4jStore, get_store
 
 
@@ -19,8 +24,21 @@ def _chunks(it: Iterable[Any], n: int) -> Iterator[list[Any]]:
         yield buf
 
 
-def _date_str(d) -> str | None:
-    return d.isoformat() if d is not None else None
+def _merge_provenance(base: dict[str, Any], prov: Provenance | None) -> dict[str, Any]:
+    """Flatten primary Provenance into the entity row.
+
+    Provenance owns ``source / source_url / source_id / retrieved_at``. We
+    denormalise onto the entity node for cheap audit queries; deep historical
+    provenance lists would live on dedicated nodes if/when we need them (not
+    in Phase 1).
+    """
+    if prov is None:
+        for k in ("source", "source_url", "source_id"):
+            base.setdefault(k, "")
+        base.setdefault("retrieved_at", None)
+        return base
+    base.update(prov.to_neo4j_props())
+    return base
 
 
 # --- Court -----------------------------------------------------------------
@@ -48,10 +66,7 @@ def load_courts(
     total = 0
     with store.session() as s:
         for batch in _chunks(courts, batch_size):
-            rows = [{
-                "id": c.id, "jurisdiction": c.jurisdiction, "name": c.name,
-                "level": c.level, "parent_id": c.parent_id,
-            } for c in batch]
+            rows = [c.to_neo4j_props() for c in batch]
             s.run(_CYPHER_COURTS, rows=rows)
             total += len(rows)
     return total
@@ -64,13 +79,20 @@ UNWIND $rows AS row
 MATCH (j:Jurisdiction {code: row.jurisdiction})
 MERGE (c:Case {id: row.id})
   ON CREATE SET c.name = row.name, c.jurisdiction = row.jurisdiction,
-                c.decision_date = date(row.decision_date),
+                c.decision_date = CASE WHEN row.decision_date IS NULL
+                                       THEN NULL ELSE date(row.decision_date) END,
                 c.court_id = row.court_id,
                 c.citations = row.citations,
                 c.source = row.source, c.source_url = row.source_url,
-                c.source_id = row.source_id, c.retrieved_at = date(row.retrieved_at)
+                c.source_id = row.source_id,
+                c.retrieved_at = CASE WHEN row.retrieved_at IS NULL
+                                      THEN NULL ELSE date(row.retrieved_at) END
   ON MATCH  SET c.name = coalesce(row.name, c.name),
-                c.decision_date = coalesce(date(row.decision_date), c.decision_date),
+                c.decision_date = coalesce(
+                    CASE WHEN row.decision_date IS NULL
+                         THEN NULL ELSE date(row.decision_date) END,
+                    c.decision_date
+                ),
                 c.court_id = coalesce(row.court_id, c.court_id)
 MERGE (c)-[:IN_JURISDICTION]->(j)
 WITH c, row
@@ -90,19 +112,7 @@ def load_cases(
     total = 0
     with store.session() as s:
         for batch in _chunks(cases, batch_size):
-            rows: list[dict[str, Any]] = []
-            for c in batch:
-                prov = c.provenance[0] if c.provenance else None
-                rows.append({
-                    "id": c.id, "jurisdiction": c.jurisdiction, "name": c.name,
-                    "decision_date": _date_str(c.decision_date),
-                    "court_id": c.court_id or "",
-                    "citations": list(c.citations),
-                    "source": prov.source if prov else "",
-                    "source_url": prov.source_url if prov else "",
-                    "source_id": prov.source_id if prov else "",
-                    "retrieved_at": _date_str(prov.retrieved_at) if prov else None,
-                })
+            rows = [_merge_provenance(c.to_neo4j_props(), c.primary_provenance()) for c in batch]
             s.run(_CYPHER_CASES, rows=rows)
             total += len(rows)
     return total
@@ -112,8 +122,8 @@ def load_cases(
 
 _CYPHER_CITES = """
 UNWIND $rows AS row
-MATCH (a:Case {id: row.citing})
-MATCH (b:Case {id: row.cited})
+MATCH (a:Case {id: row.citing_case_id})
+MATCH (b:Case {id: row.cited_case_id})
 MERGE (a)-[r:CITES]->(b)
   ON CREATE SET r.treatment = row.treatment,
                 r.weight = row.weight,
@@ -133,13 +143,7 @@ def load_citations(
     total = 0
     with store.session() as s:
         for batch in _chunks(citations, batch_size):
-            rows = [{
-                "citing": c.citing_case_id,
-                "cited": c.cited_case_id,
-                "treatment": c.treatment,
-                "weight": float(c.weight),
-                "citing_sentence": c.citing_sentence,
-            } for c in batch]
+            rows = [c.to_neo4j_props() for c in batch]
             s.run(_CYPHER_CITES, rows=rows)
             total += len(rows)
     return total
@@ -147,7 +151,10 @@ def load_citations(
 
 # --- Gate-query helpers ----------------------------------------------------
 
-def citing_cases(case_id: str, *, limit: int = 25, store: Neo4jStore | None = None) -> list[dict[str, Any]]:
+
+def citing_cases(
+    case_id: str, *, limit: int = 25, store: Neo4jStore | None = None
+) -> list[dict[str, Any]]:
     """Cases that cite the seed (inbound CITES)."""
     store = store or get_store()
     return store.run(
@@ -156,11 +163,14 @@ def citing_cases(case_id: str, *, limit: int = 25, store: Neo4jStore | None = No
         "       citing.decision_date AS decision_date, "
         "       r.treatment AS treatment "
         "ORDER BY citing.decision_date DESC LIMIT $limit",
-        id=case_id, limit=limit,
+        id=case_id,
+        limit=limit,
     )
 
 
-def cited_cases(case_id: str, *, limit: int = 25, store: Neo4jStore | None = None) -> list[dict[str, Any]]:
+def cited_cases(
+    case_id: str, *, limit: int = 25, store: Neo4jStore | None = None
+) -> list[dict[str, Any]]:
     """Cases the seed cites (outbound CITES)."""
     store = store or get_store()
     return store.run(
@@ -169,7 +179,8 @@ def cited_cases(case_id: str, *, limit: int = 25, store: Neo4jStore | None = Non
         "       cited.decision_date AS decision_date, "
         "       r.treatment AS treatment "
         "ORDER BY cited.decision_date DESC LIMIT $limit",
-        id=case_id, limit=limit,
+        id=case_id,
+        limit=limit,
     )
 
 

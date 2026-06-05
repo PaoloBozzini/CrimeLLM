@@ -8,12 +8,14 @@ Two backends:
 
 Both speak the same `classify(text) -> ZeroShotResult` interface.
 """
+
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Iterable
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import requests
 
@@ -119,7 +121,7 @@ def _parse(raw: str, labels: Iterable[str]) -> tuple[str, float, str, str]:
     return label, conf, reasoning, clean_raw
 
 
-def _format_context(hits: "list[RetrievalHit]", max_chars_per_hit: int = 600) -> str:
+def _format_context(hits: list[RetrievalHit], max_chars_per_hit: int = 600) -> str:
     """Format retrieved hits as a numbered context block for the user message."""
     if not hits:
         return ""
@@ -129,21 +131,18 @@ def _format_context(hits: "list[RetrievalHit]", max_chars_per_hit: int = 600) ->
         if len(snippet) > max_chars_per_hit:
             snippet = snippet[: max_chars_per_hit - 1].rstrip() + "…"
         cite = h.citation or h.source or "source"
-        lines.append(f"[{i}] ({cite}): \"{snippet}\"")
+        lines.append(f'[{i}] ({cite}): "{snippet}"')
     return "\n".join(lines)
 
 
-def _user_message_with_context(text: str, retriever: "LegalRetriever | None") -> str:
+def _user_message_with_context(text: str, retriever: LegalRetriever | None) -> str:
     if retriever is None:
         return text
     hits = retriever.retrieve(text)
     ctx = _format_context(hits)
     if not ctx:
         return text
-    return (
-        f"{ctx}\n\n"
-        f"Using the legal context above where relevant, classify this text:\n\n{text}"
-    )
+    return f"{ctx}\n\nUsing the legal context above where relevant, classify this text:\n\n{text}"
 
 
 class OllamaClassifier:
@@ -164,7 +163,7 @@ class OllamaClassifier:
         labels: Iterable[str] = DEFAULT_LABELS,
         temperature: float = 0.0,
         timeout: int = 120,
-        retriever: "LegalRetriever | None" = None,
+        retriever: LegalRetriever | None = None,
     ):
         self.model = model
         self.host = host.rstrip("/")
@@ -228,12 +227,12 @@ class AirLLMClassifier:
     def __init__(
         self,
         model_id: str = "Qwen/Qwen2.5-7B-Instruct",
-        compression: str | None = "4bit",   # "4bit" | "8bit" | None — CUDA only
+        compression: str | None = "4bit",  # "4bit" | "8bit" | None — CUDA only
         max_new_tokens: int = 120,
         max_input_tokens: int = 2048,
         labels: Iterable[str] = DEFAULT_LABELS,
-        device: str | None = None,          # "cuda" | "mlx" | "cpu"; auto if None
-        retriever: "LegalRetriever | None" = None,
+        device: str | None = None,  # "cuda" | "mlx" | "cpu"; auto if None
+        retriever: LegalRetriever | None = None,
     ):
         try:
             from airllm import AutoModel  # noqa: F401
@@ -242,14 +241,16 @@ class AirLLMClassifier:
                 "airllm not installed. Run: uv add airllm "
                 "(plus 'bitsandbytes accelerate' on NVIDIA for 4/8-bit)."
             ) from e
+        import platform as _platform
+
         from airllm import AutoModel
 
-        import platform as _platform
         if device is None:
             if _platform.system() == "Darwin":
                 device = "mlx"
             else:
                 from .device import resolve_device
+
                 device = resolve_device().backend  # cuda / cpu (mps not used by AirLLM)
 
         # bitsandbytes 4/8-bit only works on CUDA.
@@ -275,6 +276,7 @@ class AirLLMClassifier:
         # Lazy-import the array library matching the backend.
         if self.device == "mlx":
             import mlx.core as _mx  # noqa: F401
+
             self._mx = _mx
         else:
             self._mx = None
@@ -342,11 +344,14 @@ class AirLLMClassifier:
                 # seq may be torch tensor, mx.array, numpy, or list
                 if self.device == "mlx" and hasattr(seq, "tolist"):
                     seq_list = seq.tolist()
-                    new_tokens = seq_list[0][input_len:] if isinstance(seq_list[0], list) else seq_list[input_len:]
+                    new_tokens = (
+                        seq_list[0][input_len:]
+                        if isinstance(seq_list[0], list)
+                        else seq_list[input_len:]
+                    )
                 else:
                     new_tokens = seq[0][input_len:] if hasattr(seq, "__getitem__") else seq
                 raw = self.tokenizer.decode(new_tokens, skip_special_tokens=True)
-
 
             try:
                 label, conf, reasoning, clean = _parse(raw, self.labels)
@@ -390,16 +395,15 @@ class AnthropicClassifier:
         model: str = "claude-haiku-4-5-20251001",
         labels: Iterable[str] = DEFAULT_LABELS,
         max_tokens: int = 300,
-        retriever: "LegalRetriever | None" = None,
+        retriever: LegalRetriever | None = None,
     ):
         try:
             import anthropic  # noqa: F401
         except ImportError as e:
-            raise ImportError(
-                "anthropic package not installed. Run: uv add anthropic"
-            ) from e
+            raise ImportError("anthropic package not installed. Run: uv add anthropic") from e
         if not os.environ.get("ANTHROPIC_API_KEY"):
-            from .env import load_env
+            from ..env import load_env
+
             load_env()
         if not os.environ.get("ANTHROPIC_API_KEY"):
             raise RuntimeError(

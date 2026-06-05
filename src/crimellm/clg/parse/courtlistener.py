@@ -10,6 +10,7 @@ FK chain we walk for Phase 1:
     docket -> court            (court_id)
     citation: opinion_id -> opinion_id        (resolved to cluster_id pairs)
 """
+
 from __future__ import annotations
 
 import bz2
@@ -18,11 +19,11 @@ import io
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import date as _date
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Iterator
 
 from tqdm import tqdm
 
@@ -58,9 +59,7 @@ def _open_csv(path: Path):
             stderr=subprocess.DEVNULL,
             bufsize=1 << 22,
         )
-        wrapper = io.TextIOWrapper(
-            proc.stdout, encoding="utf-8", errors="replace", newline=""
-        )
+        wrapper = io.TextIOWrapper(proc.stdout, encoding="utf-8", errors="replace", newline="")
         try:
             yield wrapper
         finally:
@@ -106,12 +105,17 @@ def _row_iter(
 
 def _indexed_row_iter(
     path: Path,
-    columns: list[str],
+    columns: list[str | tuple[str, ...]],
     *,
     desc: str | None = None,
     progress: bool = True,
 ) -> Iterator[tuple[str, ...]]:
     """Fast path: csv.reader + column indices. Skips dict construction.
+
+    Each entry in ``columns`` is either a single column name or a tuple of
+    synonyms; the first synonym present in the header wins. CL renames
+    columns between dumps (citing_opinion_id ↔ citing_opinion ↔ id_from),
+    so callers pass tuples to stay tolerant.
 
     ~3-5x faster than DictReader on rows with many large fields.
     """
@@ -120,10 +124,15 @@ def _indexed_row_iter(
         header = next(reader, None)
         if header is None:
             return
-        try:
-            idx = [header.index(c) for c in columns]
-        except ValueError as e:
-            raise ValueError(f"missing column in {path.name}: {e}") from e
+        idx: list[int] = []
+        for c in columns:
+            choices = (c,) if isinstance(c, str) else tuple(c)
+            picked = next((header.index(x) for x in choices if x in header), None)
+            if picked is None:
+                raise ValueError(
+                    f"missing column in {path.name}: none of {choices!r} in header={header!r}"
+                )
+            idx.append(picked)
         max_idx = max(idx)
         if progress:
             reader = tqdm(reader, desc=desc or Path(path).name, unit="row", unit_scale=True)
@@ -154,6 +163,7 @@ def _prov(source_id: str, source_url: str | None = None) -> Provenance:
 
 # --- courts ----------------------------------------------------------------
 
+
 def iter_courts(courts_csv: Path, *, progress: bool = False) -> Iterator[Court]:
     for row in _row_iter(courts_csv, desc="courts", progress=progress):
         cid = (row.get("id") or "").strip()
@@ -174,6 +184,7 @@ def iter_courts(courts_csv: Path, *, progress: bool = False) -> Iterator[Court]:
 
 # --- dockets (cluster_id -> court_id resolution) ---------------------------
 
+
 def build_docket_to_court(
     dockets_csv: Path | None,
     allowed_docket_ids: Iterable[str] | None = None,
@@ -186,8 +197,10 @@ def build_docket_to_court(
     allow = set(allowed_docket_ids) if allowed_docket_ids is not None else None
     out: dict[str, str] = {}
     for did, cid in _indexed_row_iter(
-        Path(dockets_csv), ["id", "court_id"],
-        desc="dockets", progress=progress,
+        Path(dockets_csv),
+        ["id", "court_id"],
+        desc="dockets",
+        progress=progress,
     ):
         did = did.strip()
         cid = cid.strip()
@@ -200,6 +213,7 @@ def build_docket_to_court(
 
 
 # --- clusters -> Case -------------------------------------------------------
+
 
 def iter_cases(
     clusters_csv: Path,
@@ -222,7 +236,12 @@ def iter_cases(
             id=f"cl-cluster-{cid}",
             jurisdiction="US",
             court_id=court_id,
-            name=(row.get("case_name") or row.get("case_name_short") or row.get("case_name_full") or "").strip(),
+            name=(
+                row.get("case_name")
+                or row.get("case_name_short")
+                or row.get("case_name_full")
+                or ""
+            ).strip(),
             decision_date=_date_or_none(row.get("date_filed")),
             citations=[],
             provenance=[_prov(cid, cluster_url)],
@@ -233,12 +252,18 @@ def iter_cases(
 
 
 def cluster_ids(
-    clusters_csv: Path, *, limit: int | None = None, progress: bool = False,
+    clusters_csv: Path,
+    *,
+    limit: int | None = None,
+    progress: bool = False,
 ) -> set[str]:
     """Lightweight pre-pass: collect cluster ids (optionally first `limit`)."""
     out: set[str] = set()
     for (cid,) in _indexed_row_iter(
-        Path(clusters_csv), ["id"], desc="clusters:ids", progress=progress,
+        Path(clusters_csv),
+        ["id"],
+        desc="clusters:ids",
+        progress=progress,
     ):
         cid = cid.strip()
         if cid:
@@ -256,8 +281,10 @@ def docket_ids_for_clusters(
 ) -> set[str]:
     out: set[str] = set()
     for cid, did in _indexed_row_iter(
-        Path(clusters_csv), ["id", "docket_id"],
-        desc="clusters:dockets", progress=progress,
+        Path(clusters_csv),
+        ["id", "docket_id"],
+        desc="clusters:dockets",
+        progress=progress,
     ):
         if cid.strip() in allowed_clusters:
             did = did.strip()
@@ -267,6 +294,7 @@ def docket_ids_for_clusters(
 
 
 # --- opinions (opinion_id -> cluster_id) -----------------------------------
+
 
 def build_opinion_to_cluster(
     opinions_csv: Path,
@@ -281,8 +309,10 @@ def build_opinion_to_cluster(
     """
     out: dict[str, str] = {}
     for oid, cl in _indexed_row_iter(
-        Path(opinions_csv), ["id", "cluster_id"],
-        desc="opinions", progress=progress,
+        Path(opinions_csv),
+        ["id", "cluster_id"],
+        desc="opinions",
+        progress=progress,
     ):
         oid = oid.strip()
         cl = cl.strip()
@@ -326,7 +356,10 @@ def build_opinion_cluster_index(
         w = csv.writer(fh)
         w.writerow(["opinion_id", "cluster_id"])
         for oid, cl in _indexed_row_iter(
-            src, ["id", "cluster_id"], desc="indexing opinions", progress=progress,
+            src,
+            ["id", "cluster_id"],
+            desc="indexing opinions",
+            progress=progress,
         ):
             oid = oid.strip()
             cl = cl.strip()
@@ -344,8 +377,10 @@ def load_opinion_cluster_index(
 ) -> dict[str, str]:
     out: dict[str, str] = {}
     for oid, cl in _indexed_row_iter(
-        Path(idx_csv), ["opinion_id", "cluster_id"],
-        desc="opcluster", progress=progress,
+        Path(idx_csv),
+        ["opinion_id", "cluster_id"],
+        desc="opcluster",
+        progress=progress,
     ):
         if allowed_clusters is not None and cl not in allowed_clusters:
             continue
@@ -354,6 +389,7 @@ def load_opinion_cluster_index(
 
 
 # --- citations -------------------------------------------------------------
+
 
 def iter_citations(
     citations_csv: Path,
@@ -368,8 +404,13 @@ def iter_citations(
     """
     for citing_op, cited_op, depth_s in _indexed_row_iter(
         Path(citations_csv),
-        ["citing_opinion_id", "cited_opinion_id", "depth"],
-        desc="citations", progress=progress,
+        [
+            ("citing_opinion_id", "citing_opinion", "id_from", "from_id", "citing"),
+            ("cited_opinion_id", "cited_opinion", "id_to", "to_id", "cited"),
+            ("depth", "weight", "n"),
+        ],
+        desc="citations",
+        progress=progress,
     ):
         citing = opinion_to_cluster.get(citing_op.strip())
         cited = opinion_to_cluster.get(cited_op.strip())

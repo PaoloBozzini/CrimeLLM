@@ -38,6 +38,7 @@ def test_wipe_refuses_without_yes() -> None:
 def test_find_case_law_refuses_without_licence(monkeypatch) -> None:
     monkeypatch.setenv("TNA_COMPUTATIONAL_LICENCE_ACCEPTED", "0")
     from crimellm.clg import config as cfg
+
     cfg.get_settings.cache_clear()
     r = runner.invoke(app, ["ingest", "find-case-law"])
     assert r.exit_code == 2

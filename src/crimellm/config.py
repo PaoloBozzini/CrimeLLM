@@ -1,28 +1,29 @@
-from dataclasses import dataclass, field
+"""Deprecated shim. Re-exports the training ``Config`` from ``classifier.config``.
 
+This module used to hold the fine-tune classifier ``Config`` dataclass. The
+classifier stack now lives under ``crimellm.classifier``; import from there:
 
-@dataclass
-class Config:
-    model_name: str = "law-ai/InLegalBERT"
-    max_len: int = 256
-    num_train_epochs: int = 4
-    learning_rate: float = 2e-5
-    train_batch_size: int = 8
-    eval_batch_size: int = 8
-    output_dir: str = "./crime_classifier"
-    seed: int = 42
-    test_size: float = 0.33
-    # If True, freeze encoder and train only the classification head (linear probe).
-    # Faster, less data-hungry, lower ceiling. Set False for full fine-tune.
-    freeze_encoder: bool = True
-    id2label: dict[int, str] = field(
-        default_factory=lambda: {0: "no", 1: "yes", 2: "unclear"}
-    )
+    from crimellm.classifier import Config       # preferred
+    from crimellm.classifier.config import Config
 
-    @property
-    def label2id(self) -> dict[str, int]:
-        return {v: k for k, v in self.id2label.items()}
+Or use the top-level re-export:
 
-    @property
-    def num_labels(self) -> int:
-        return len(self.id2label)
+    from crimellm import Config
+
+Scheduled for removal in v0.3.
+"""
+
+from __future__ import annotations
+
+import warnings
+
+from .classifier.config import Config  # noqa: F401
+
+warnings.warn(
+    "crimellm.config is deprecated; import from crimellm.classifier (or "
+    "crimellm.classifier.config) instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
+__all__ = ["Config"]

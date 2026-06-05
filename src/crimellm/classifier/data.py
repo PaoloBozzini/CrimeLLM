@@ -5,7 +5,6 @@ from pathlib import Path
 import pandas as pd
 from datasets import ClassLabel, Dataset, DatasetDict
 
-
 _SAMPLE = {
     "text": [
         "He took the neighbour's bike without asking and sold it.",
@@ -24,13 +23,13 @@ def _cast_label(ds: Dataset, num_labels: int) -> Dataset:
 
 
 def _split(ds: Dataset, test_size: float, seed: int) -> DatasetDict:
-    split = ds.train_test_split(
-        test_size=test_size, seed=seed, stratify_by_column="label"
-    )
+    split = ds.train_test_split(test_size=test_size, seed=seed, stratify_by_column="label")
     return DatasetDict(train=split["train"], test=split["test"])
 
 
-def load_sample_dataset(test_size: float = 0.33, seed: int = 42, num_labels: int = 3) -> DatasetDict:
+def load_sample_dataset(
+    test_size: float = 0.33, seed: int = 42, num_labels: int = 3
+) -> DatasetDict:
     ds = _cast_label(Dataset.from_dict(_SAMPLE), num_labels)
     return _split(ds, test_size, seed)
 

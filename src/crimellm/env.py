@@ -8,6 +8,7 @@ Search order if `path=None`:
   1. `$CWD/.env`
   2. walk up parents until a `.env` is found, stopping at the filesystem root.
 """
+
 from __future__ import annotations
 
 import os

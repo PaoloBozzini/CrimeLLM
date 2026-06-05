@@ -1,29 +1,61 @@
 # CrimeLLM
 
-Three-class crime classifier (`no` / `yes` / `unclear`) for short text snippets. Bundles three independent paths in one `uv` package:
+Two complementary pipelines under one `uv` package.
+
+### Pipeline 1 — **classifier** (original)
+
+Three-class crime classifier (`no` / `yes` / `unclear`) for short text snippets. Three independent paths:
 
 1. **Fine-tune** — `law-ai/InLegalBERT` (or any HF encoder) + a 3-class head.
 2. **Zero-shot LLM** — uniform `classify(text)` API over three backends:
    - `OllamaClassifier` (local, JSON-schema constrained decoding)
    - `AnthropicClassifier` (Claude API, forced tool-use for schema enforcement, prompt caching)
    - `AirLLMClassifier` (layer-by-layer disk offload; MLX on Mac, CUDA + bitsandbytes on NVIDIA)
-3. **RAG** — `LegalRetriever` (FAISS + BGE-small) over a corpus you build from:
+3. **FAISS RAG** — `LegalRetriever` (FAISS + BGE-small) over a JSONL corpus built from:
    - **US Code** (Title 18 — criminal code) via govinfo.gov
    - **UK Acts of Parliament** (Fraud Act, Theft Act, Bribery Act, …) via legislation.gov.uk
    - **CourtListener** judgments (federal/state case law) via REST v4
 
-Plus a frozen-embedding linear probe (`embed_probe.py`) for quick base-model bake-offs.
+Lives at the package root (`train.py`, `inference.py`, `rag.py`, `zero_shot.py`, `embed_probe.py`, `corpora.py`). Plus a frozen-embedding linear probe for quick base-model bake-offs.
+
+### Pipeline 2 — **clg (Common Legal Graph)**
+
+Neo4j graph RAG over US + UK primary law. Lives under `src/crimellm/clg/`. Encodes the **citation and treatment** network plus **point-in-time legislation**, so it can answer multi-hop, "is this still good law?", and "as of date X" questions that flat vector RAG cannot. See [`docs/phases.local.md`](docs/phases.local.md) for the phase tracker (local-only, untracked) and the section further down for `clg` usage.
+
+### Why two ingest layers?
+
+Both pipelines pull from CourtListener / legislation.gov.uk / govinfo, but they ingest at different granularities:
+
+- `crimellm.corpora` (REST → JSONL) for the FAISS pipeline — convenient single-file snippet corpora for the classifier.
+- `crimellm.clg.ingest.*` (bulk CSV / XML → Neo4j) for the graph pipeline — full edges, full provenance, full point-in-time history.
+
+They share `crimellm.common.http` (retry + UA + resumable download) so neither pays for the other.
 
 ## Setup
 
-Install [uv](https://docs.astral.sh/uv/), then from the project root:
+Install [uv](https://docs.astral.sh/uv/), then pick the extras you need:
 
 ```bash
-uv sync                       # core: transformers, faiss, sentence-transformers, ...
+# Lean default — just enough for shared utilities.
+uv sync
+
+# Pipeline 1 (classifier + FAISS RAG + zero-shot baselines).
+uv sync --extra classifier
 uv sync --extra airllm        # optional: AirLLM zero-shot backend
 uv sync --extra airllm-mlx    # optional: Mac MLX backend for AirLLM
 uv sync --extra airllm-cuda   # optional: NVIDIA + 4/8-bit (bitsandbytes)
-uv sync --extra anthropic     # optional: Claude API backend
+
+# Pipeline 2 (clg — Neo4j graph RAG).
+uv sync --extra clg
+
+# Cross-cutting.
+uv sync --extra anthropic     # Claude API (used by both pipelines)
+
+# Everything (= classifier + clg + anthropic).
+uv sync --extra all
+
+# Contributor tooling.
+uv sync --extra dev           # pytest + ruff
 ```
 
 Cross-platform PyTorch: macOS gets MPS-ready PyPI wheel; Windows auto-routes to the CUDA 12.1 index via `[tool.uv.sources]`. Edit `pyproject.toml` if you need another CUDA version.
@@ -107,11 +139,15 @@ uv run python -m ipykernel install --user --name crimellm --display-name "CrimeL
 uv run jupyter lab notebooks/
 ```
 
-- `finetune.ipynb` — train + evaluate the InLegalBERT classifier
-- `base_model_bakeoff.ipynb` — macro-F1 across candidate base models
-- `embedding_probe.ipynb` — frozen-embedding + logistic regression probe
-- `zero_shot_llm.ipynb` — Ollama / Anthropic / AirLLM comparison
-- `rag_demo.ipynb` — full pipeline: ingest USC + UK + CL → FAISS → classify with vs. without RAG
+Layout:
+
+- `notebooks/classifier/` — original classifier + FAISS RAG demos:
+  - `finetune.ipynb` — train + evaluate the InLegalBERT classifier
+  - `base_model_bakeoff.ipynb` — macro-F1 across candidate base models
+  - `embedding_probe.ipynb` — frozen-embedding + logistic regression probe
+  - `zero_shot_llm.ipynb` — Ollama / Anthropic / AirLLM comparison
+  - `rag_demo.ipynb` — full pipeline: ingest USC + UK + CL → FAISS → classify with vs. without RAG
+- `notebooks/clg/` — graph RAG notebooks (Phase 3+ will populate this).
 
 ## Package layout
 

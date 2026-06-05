@@ -1,8 +1,10 @@
 """Thin Neo4j wrapper. Keeps the store behind an interface so it's swappable."""
+
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 from neo4j import Driver, GraphDatabase, Session
 
@@ -17,9 +19,7 @@ class Neo4jStore:
     def connect(self) -> Driver:
         if self._driver is None:
             s = self.settings
-            self._driver = GraphDatabase.driver(
-                s.neo4j_uri, auth=(s.neo4j_user, s.neo4j_password)
-            )
+            self._driver = GraphDatabase.driver(s.neo4j_uri, auth=(s.neo4j_user, s.neo4j_password))
         return self._driver
 
     def close(self) -> None:

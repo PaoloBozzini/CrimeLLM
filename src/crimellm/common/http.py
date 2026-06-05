@@ -3,13 +3,14 @@
 Single source of truth for User-Agent, retry/backoff (Retry-After-aware),
 JSONL writing, and streaming downloads with resume.
 """
+
 from __future__ import annotations
 
 import json
-import os
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import httpx
 from tqdm import tqdm
@@ -29,8 +30,8 @@ def get_with_retry(
     for attempt in range(max_retries + 1):
         r = client.get(url, params=params, timeout=timeout)
         if r.status_code == 429 and attempt < max_retries:
-            wait = float(r.headers.get("Retry-After") or 2 ** attempt)
-            tqdm.write(f"[http] 429 on {url} -- sleep {wait}s (attempt {attempt+1})")
+            wait = float(r.headers.get("Retry-After") or 2**attempt)
+            tqdm.write(f"[http] 429 on {url} -- sleep {wait}s (attempt {attempt + 1})")
             time.sleep(wait)
             continue
         r.raise_for_status()
@@ -94,10 +95,17 @@ def stream_download(
             r.raise_for_status()
             mode = "ab" if start and r.status_code == 206 else "wb"
             total = int(r.headers.get("Content-Length", 0)) + (start if mode == "ab" else 0)
-            with open(dest, mode) as f, tqdm(
-                total=total or None, initial=start if mode == "ab" else 0,
-                unit="B", unit_scale=True, desc=desc or dest.name, leave=False,
-            ) as bar:
+            with (
+                open(dest, mode) as f,
+                tqdm(
+                    total=total or None,
+                    initial=start if mode == "ab" else 0,
+                    unit="B",
+                    unit_scale=True,
+                    desc=desc or dest.name,
+                    leave=False,
+                ) as bar,
+            ):
                 for block in r.iter_bytes(chunk_size=chunk):
                     f.write(block)
                     bar.update(len(block))

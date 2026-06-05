@@ -1,6 +1,10 @@
 """Source downloaders. Each is resumable, rate-limited, cached, provenance-tagged.
 
-Phase 0: stubs only. Phase 1+ implements per source. Existing
-`crimellm.corpora` downloaders (USC, CourtListener, UK leg) feed into these
-adapters until per-source modules land.
+Phase 1 onwards. New sources implement ``Source`` from ``_base``; the
+existing ``courtlistener`` module is a procedural sketch from Phase 1 and
+will be adapted to the ABC alongside Phase 2's second source.
 """
+
+from ._base import IngestContext, LoadReport, Source
+
+__all__ = ["IngestContext", "LoadReport", "Source"]

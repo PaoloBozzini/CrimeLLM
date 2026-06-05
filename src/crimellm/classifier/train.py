@@ -35,9 +35,7 @@ def _build_metrics():
         preds = np.argmax(logits, axis=-1)
         return {
             "accuracy": acc.compute(predictions=preds, references=labels)["accuracy"],
-            "macro_f1": f1.compute(
-                predictions=preds, references=labels, average="macro"
-            )["f1"],
+            "macro_f1": f1.compute(predictions=preds, references=labels, average="macro")["f1"],
         }
 
     return compute_metrics

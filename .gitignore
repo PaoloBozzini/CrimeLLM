@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 .DS_Store
+artifacts/
 crime_classifier/
 runs/
 wandb/
@@ -10,8 +11,24 @@ wandb/
 dist/
 build/
 .uv-cache/
-data/corpora/
 .env
 .env.local
 *.local.*
-data/
+
+# `data/` payloads are gitignored, but the scaffolding (sample CSV + .gitkeep
+# markers under raw/interim/processed/cache) stays in git so a fresh checkout
+# has the expected layout.
+data/*
+!data/sample.csv
+!data/raw/
+!data/interim/
+!data/processed/
+!data/cache/
+data/raw/*
+data/interim/*
+data/processed/*
+data/cache/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/cache/.gitkeep

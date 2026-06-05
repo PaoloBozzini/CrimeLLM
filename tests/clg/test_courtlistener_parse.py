@@ -53,8 +53,14 @@ def test_iter_cases_respects_limit() -> None:
 
 def test_opinion_to_cluster_filtering() -> None:
     full = P.build_opinion_to_cluster(_f("opinions"))
-    assert full == {"3001": "2001", "3002": "2002", "3003": "2003",
-                    "3004": "2004", "3005": "2005", "3006": "2006"}
+    assert full == {
+        "3001": "2001",
+        "3002": "2002",
+        "3003": "2003",
+        "3004": "2004",
+        "3005": "2005",
+        "3006": "2006",
+    }
     scoped = P.build_opinion_to_cluster(_f("opinions"), allowed_clusters={"2001", "2002"})
     assert scoped == {"3001": "2001", "3002": "2002"}
 

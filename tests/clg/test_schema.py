@@ -1,4 +1,5 @@
 """Smoke test: schema applies idempotently against a live Neo4j (skipped otherwise)."""
+
 from __future__ import annotations
 
 from crimellm.clg.graph.schema import apply_schema, schema_status
@@ -21,8 +22,6 @@ def test_status_shows_constraints(neo4j_store) -> None:
 
 def test_jurisdictions_seeded(neo4j_store) -> None:
     apply_schema(neo4j_store)
-    rows = neo4j_store.run(
-        "MATCH (j:Jurisdiction) RETURN j.code AS code ORDER BY code"
-    )
+    rows = neo4j_store.run("MATCH (j:Jurisdiction) RETURN j.code AS code ORDER BY code")
     codes = {r["code"] for r in rows}
     assert {"US", "EW", "UK"}.issubset(codes)

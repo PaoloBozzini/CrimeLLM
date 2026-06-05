@@ -14,6 +14,7 @@ CLI:
     python -m crimellm.corpora courtlistener  --out data/corpora/cl    [--max-docs N]
     python -m crimellm.corpora uk             --out data/corpora/uk    [--statutes "ukpga/2006/35" "ukpga/1968/60"]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,15 +23,18 @@ import os
 import re
 import sys
 import time
+from collections.abc import Iterable, Iterator
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any
 
 import httpx
 from tqdm import tqdm
 
-from ._http import UA, get_with_retry as _get_with_retry, write_jsonl as _write_jsonl_shared
-from .env import load_env
+from ..common.http import UA
+from ..common.http import get_with_retry as _get_with_retry
+from ..common.http import write_jsonl as _write_jsonl_shared
+from ..env import load_env
 
 GOVINFO_API = "https://api.govinfo.gov"
 GOVINFO_CONTENT = "https://www.govinfo.gov/content/pkg"
@@ -44,19 +48,20 @@ LEG_UK_NS = {
 
 # Default UK criminal-law statutes (type, year, number).
 UK_CRIMINAL_ACTS: tuple[tuple[str, int, int], ...] = (
-    ("ukpga", 2006, 35),   # Fraud Act 2006
-    ("ukpga", 1968, 60),   # Theft Act 1968
-    ("ukpga", 1971, 38),   # Misuse of Drugs Act 1971
-    ("ukpga", 1971, 48),   # Criminal Damage Act 1971
+    ("ukpga", 2006, 35),  # Fraud Act 2006
+    ("ukpga", 1968, 60),  # Theft Act 1968
+    ("ukpga", 1971, 38),  # Misuse of Drugs Act 1971
+    ("ukpga", 1971, 48),  # Criminal Damage Act 1971
     ("ukpga", 1861, 100),  # Offences against the Person Act 1861
-    ("ukpga", 1986, 64),   # Public Order Act 1986
-    ("ukpga", 2003, 42),   # Sexual Offences Act 2003
-    ("ukpga", 2015, 30),   # Modern Slavery Act 2015
-    ("ukpga", 2010, 23),   # Bribery Act 2010
+    ("ukpga", 1986, 64),  # Public Order Act 1986
+    ("ukpga", 2003, 42),  # Sexual Offences Act 2003
+    ("ukpga", 2015, 30),  # Modern Slavery Act 2015
+    ("ukpga", 2010, 23),  # Bribery Act 2010
 )
 
 
 # --- shared utilities -------------------------------------------------------
+
 
 def _ws(s: str | None) -> str:
     return re.sub(r"\s+", " ", s).strip() if s else ""
@@ -73,6 +78,7 @@ def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
 
 
 # --- US Code: USLM XML parser -----------------------------------------------
+
 
 def _section_text(section) -> str:
     parts: list[str] = []
@@ -130,6 +136,7 @@ def parse_us_code(xml_path: str | Path, title_hint: str | None = None) -> Iterat
 
 # --- US Code: govinfo HTML --------------------------------------------------
 
+
 class _USCSectionHTMLParser(HTMLParser):
     """Extract the section heading + statutory body from govinfo USC HTML."""
 
@@ -174,9 +181,7 @@ def _parse_usc_html(html: str) -> tuple[str, str]:
     return p.heading, p.text()
 
 
-def _usc_record(
-    granule_id: str, title: str, year: int, heading: str, body: str
-) -> dict[str, Any]:
+def _usc_record(granule_id: str, title: str, year: int, heading: str, body: str) -> dict[str, Any]:
     m = re.search(r"sec([\w.]+)$", granule_id)
     sec = m.group(1) if m else granule_id
     citation = f"{title} U.S.C. § {sec}"
@@ -187,8 +192,11 @@ def _usc_record(
         "citation": citation,
         "type": "statute",
         "metadata": {
-            "title": title, "section": sec, "heading": heading,
-            "package_id": f"USCODE-{year}-title{title}", "year": year,
+            "title": title,
+            "section": sec,
+            "heading": heading,
+            "package_id": f"USCODE-{year}-title{title}",
+            "year": year,
         },
     }
 
@@ -275,8 +283,11 @@ def download_us_code(
                         continue
                     heading, body = _parse_usc_html(r.text)
                     if body:
-                        records.append(_usc_record(g["granuleId"], title, year,
-                                                   heading or g.get("title", ""), body))
+                        records.append(
+                            _usc_record(
+                                g["granuleId"], title, year, heading or g.get("title", ""), body
+                            )
+                        )
 
     _write_jsonl(records, out)
     print(f"[corpora] wrote {len(records)} records -> {out}")
@@ -284,6 +295,7 @@ def download_us_code(
 
 
 # --- CourtListener ----------------------------------------------------------
+
 
 def _opinion_text(data: dict[str, Any]) -> str:
     text = data.get("plain_text") or ""
@@ -293,7 +305,9 @@ def _opinion_text(data: dict[str, Any]) -> str:
     return _ws(text)
 
 
-def _cl_record(hit: dict[str, Any], op_meta: dict[str, Any], body: str, max_chars: int) -> dict[str, Any] | None:
+def _cl_record(
+    hit: dict[str, Any], op_meta: dict[str, Any], body: str, max_chars: int
+) -> dict[str, Any] | None:
     text_body = body or _ws((hit.get("opinions") or [{}])[0].get("snippet", ""))
     if not text_body:
         return None
@@ -302,10 +316,14 @@ def _cl_record(hit: dict[str, Any], op_meta: dict[str, Any], body: str, max_char
 
     case_name = hit.get("caseName") or hit.get("caseNameFull") or ""
     cites = hit.get("citation") or []
-    citation = (cites[0] if isinstance(cites, list) and cites else (cites if isinstance(cites, str) else case_name)) or "?"
+    citation = (
+        cites[0]
+        if isinstance(cites, list) and cites
+        else (cites if isinstance(cites, str) else case_name)
+    ) or "?"
     op_id = (hit.get("opinions") or [{}])[0].get("id")
     cluster_id = hit.get("cluster_id", "")
-    header = f"{case_name} ({hit.get('court_citation_string','')}, {hit.get('dateFiled','')})"
+    header = f"{case_name} ({hit.get('court_citation_string', '')}, {hit.get('dateFiled', '')})"
     abs_url = hit.get("absolute_url", "")
     return {
         "id": f"cl-op-{op_id or cluster_id}",
@@ -373,10 +391,14 @@ def download_courtlistener(
                     body, op_meta = "", {}
                     if fetch_bodies and op_id:
                         try:
-                            data = _get_with_retry(client, f"{COURTLISTENER_API}/opinions/{op_id}/").json()
+                            data = _get_with_retry(
+                                client, f"{COURTLISTENER_API}/opinions/{op_id}/"
+                            ).json()
                             body, op_meta = _opinion_text(data), data
                         except httpx.HTTPStatusError as e:
-                            print(f"[corpora] /opinions/{op_id} -> {e.response.status_code}; snippet")
+                            print(
+                                f"[corpora] /opinions/{op_id} -> {e.response.status_code}; snippet"
+                            )
                         if pacing_seconds > 0:
                             time.sleep(pacing_seconds)
 
@@ -398,7 +420,10 @@ def download_courtlistener(
 
 # --- UK legislation.gov.uk --------------------------------------------------
 
-def _parse_uk_act(xml_bytes: bytes, act_type: str, year: int, number: int) -> Iterator[dict[str, Any]]:
+
+def _parse_uk_act(
+    xml_bytes: bytes, act_type: str, year: int, number: int
+) -> Iterator[dict[str, Any]]:
     """Yield one record per <P1> (section) from a whole-act CLML XML response."""
     from lxml import etree
 
@@ -477,13 +502,13 @@ def download_uk_legislation(
 
 # --- BAILII (stub) ----------------------------------------------------------
 
+
 def download_bailii(base_path: str | Path, **kwargs) -> int:
-    raise NotImplementedError(
-        "BAILII ingestion not implemented yet. See https://www.bailii.org/ ."
-    )
+    raise NotImplementedError("BAILII ingestion not implemented yet. See https://www.bailii.org/ .")
 
 
 # --- CLI --------------------------------------------------------------------
+
 
 def _main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="crimellm.corpora", description=__doc__)
@@ -499,7 +524,10 @@ def _main(argv: list[str] | None = None) -> int:
 
     pc = sub.add_parser("courtlistener", help="Ingest CourtListener opinions.")
     pc.add_argument("--out", required=True)
-    pc.add_argument("--query", default="bank robbery OR fraud OR theft OR burglary OR assault OR murder OR forgery")
+    pc.add_argument(
+        "--query",
+        default="bank robbery OR fraud OR theft OR burglary OR assault OR murder OR forgery",
+    )
     pc.add_argument("--court", default=None)
     pc.add_argument("--max-docs", type=int, default=50)
     pc.add_argument("--api-token", default=None)
@@ -510,19 +538,34 @@ def _main(argv: list[str] | None = None) -> int:
     pk = sub.add_parser("uk", help="Ingest UK Acts of Parliament from legislation.gov.uk.")
     pk.add_argument("--out", required=True)
     pk.add_argument(
-        "--statutes", nargs="*", default=None,
+        "--statutes",
+        nargs="*",
+        default=None,
         help='Slash-form ids like "ukpga/2006/35" (Fraud Act 2006). Default: UK_CRIMINAL_ACTS.',
     )
     pk.add_argument("--max-sections-per-act", type=int, default=None)
 
     a = p.parse_args(argv)
     if a.cmd == "us-code":
-        download_us_code(a.out, titles=a.titles, year=a.year, api_key=a.api_key,
-                         max_sections=a.max_sections, xml_path=a.xml)
+        download_us_code(
+            a.out,
+            titles=a.titles,
+            year=a.year,
+            api_key=a.api_key,
+            max_sections=a.max_sections,
+            xml_path=a.xml,
+        )
     elif a.cmd == "courtlistener":
-        download_courtlistener(a.out, query=a.query, court=a.court, max_docs=a.max_docs,
-                               api_token=a.api_token, order_by=a.order_by,
-                               full_bodies=not a.snippets_only, max_chars=a.max_chars)
+        download_courtlistener(
+            a.out,
+            query=a.query,
+            court=a.court,
+            max_docs=a.max_docs,
+            api_token=a.api_token,
+            order_by=a.order_by,
+            full_bodies=not a.snippets_only,
+            max_chars=a.max_chars,
+        )
     elif a.cmd == "uk":
         statutes = UK_CRIMINAL_ACTS
         if a.statutes:
@@ -531,8 +574,9 @@ def _main(argv: list[str] | None = None) -> int:
                 for s in a.statutes
                 for parts in [s.split("/")]
             )
-        download_uk_legislation(a.out, statutes=statutes,
-                                max_sections_per_act=a.max_sections_per_act)
+        download_uk_legislation(
+            a.out, statutes=statutes, max_sections_per_act=a.max_sections_per_act
+        )
     return 0
 
 

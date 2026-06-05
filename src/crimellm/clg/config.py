@@ -1,4 +1,5 @@
 """Settings for the clg pipeline. All secrets via env (loaded from .env)."""
+
 from __future__ import annotations
 
 from functools import lru_cache

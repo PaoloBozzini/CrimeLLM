@@ -3,6 +3,7 @@
 Wipes Cases + CITES (preserves schema), loads the tiny fixture, then exercises
 the gate query: inbound/outbound CITES counts for the Chevron seed.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,8 +11,12 @@ from pathlib import Path
 import pytest
 
 from crimellm.clg.graph.loaders import (
-    citation_counts, cited_cases, citing_cases,
-    load_cases, load_citations, load_courts,
+    citation_counts,
+    cited_cases,
+    citing_cases,
+    load_cases,
+    load_citations,
+    load_courts,
 )
 from crimellm.clg.graph.schema import apply_schema
 from crimellm.clg.parse import courtlistener as P
@@ -48,7 +53,7 @@ def test_loaders_return_expected_counts(loaded) -> None:
 def test_chevron_inbound_outbound(loaded) -> None:
     store, _ = loaded
     counts = citation_counts("cl-cluster-2001", store=store)
-    assert counts["inbound"] == 5    # rows 1-5 cite Chevron
+    assert counts["inbound"] == 5  # rows 1-5 cite Chevron
     assert counts["outbound"] == 0
 
 
@@ -63,8 +68,7 @@ def test_loper_bright_cites_chevron(loaded) -> None:
 def test_decided_edges_exist(loaded) -> None:
     store, _ = loaded
     rows = store.run(
-        "MATCH (ct:Court)-[:DECIDED]->(c:Case {id: 'cl-cluster-2001'}) "
-        "RETURN ct.id AS court_id"
+        "MATCH (ct:Court)-[:DECIDED]->(c:Case {id: 'cl-cluster-2001'}) RETURN ct.id AS court_id"
     )
     assert rows and rows[0]["court_id"] == "scotus"
 
@@ -91,6 +95,11 @@ def test_idempotent_reload(loaded) -> None:
 def test_ingest_module_url_builder() -> None:
     """Phase 1.2 helper sanity: builds well-formed bulk URLs."""
     from crimellm.clg.ingest.courtlistener import BULK_FILES, file_url
+
+    # The "citations" key resolves to CL's OpinionsCited dump (the edge map),
+    # NOT the reporter-citation table (which is filed under reporter_citations).
     url = file_url("citations", "2024-12-31")
-    assert url.endswith("citations-2024-12-31.csv.bz2")
+    assert url.endswith("citation-map-2024-12-31.csv.bz2")
+    url2 = file_url("reporter_citations", "2024-12-31")
+    assert url2.endswith("citations-2024-12-31.csv.bz2")
     assert set(BULK_FILES) >= {"courts", "dockets", "clusters", "opinions", "citations"}

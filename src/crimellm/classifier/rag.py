@@ -1,10 +1,22 @@
-"""RAG retrieval for legal context.
+"""Classifier-stack FAISS retriever (``LegalRetriever``).
+
+This is the original, flat-vector RAG retriever paired with the fine-tune
+classifier. It is **not** the clg graph-RAG retriever (Phase 4 — that lives
+under ``crimellm.clg.retrieval``). Both retrievers can coexist; pick based on
+the task:
+
+* ``LegalRetriever`` — quick lookup of statute/judgment snippets by
+  similarity, single embedding model, FAISS IndexFlatIP. Good for the
+  classifier and notebook demos.
+* ``crimellm.clg.retrieval`` — graph traversal over the citation/treatment
+  network with point-in-time + jurisdiction filters. Good for multi-hop +
+  good-law + as-of-date queries.
 
 Encodes a corpus of legal documents (statutes, judgments) with a
 sentence-transformers model, indexes them in FAISS (cosine via inner-product
-on L2-normalized vectors), and retrieves top-k relevant snippets for a query.
+on L2-normalised vectors), and retrieves top-k relevant snippets for a query.
 
-Corpus record schema (one JSON per line in `<base>.jsonl`):
+Corpus record schema (one JSON per line in ``<base>.jsonl``):
 
     {
         "id":       str,
@@ -15,12 +27,14 @@ Corpus record schema (one JSON per line in `<base>.jsonl`):
         "metadata": dict,           # free-form extras
     }
 """
+
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -67,16 +81,14 @@ class LegalRetriever:
         embedding_model: str = "BAAI/bge-small-en-v1.5",
         batch_size: int = 32,
         top_k: int = 5,
-    ) -> "LegalRetriever":
+    ) -> LegalRetriever:
         try:
             import faiss
         except ImportError as e:
             raise ImportError("faiss-cpu not installed. Run: uv add faiss-cpu") from e
 
         texts = [d["text"] for d in documents]
-        vecs, model = encode_texts(
-            embedding_model, texts, batch_size=batch_size, normalize=True
-        )
+        vecs, model = encode_texts(embedding_model, texts, batch_size=batch_size, normalize=True)
         vecs = np.ascontiguousarray(vecs.astype(np.float32))
         dim = int(vecs.shape[1])
         index = faiss.IndexFlatIP(dim)
@@ -94,7 +106,7 @@ class LegalRetriever:
         return cls(index, list(documents), embedding_model, top_k=top_k, _model=model)
 
     @classmethod
-    def load(cls, base_path: str | Path, top_k: int = 5) -> "LegalRetriever":
+    def load(cls, base_path: str | Path, top_k: int = 5) -> LegalRetriever:
         try:
             import faiss
         except ImportError as e:
@@ -119,18 +131,20 @@ class LegalRetriever:
     def retrieve(self, query: str, k: int | None = None) -> list[RetrievalHit]:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
+
             from .device import resolve_device
+
             backend = resolve_device().backend
             st_device = backend if backend in {"cuda", "mps", "cpu"} else "cpu"
             self._model = SentenceTransformer(self._model_name, device=st_device)
         k = k if k is not None else self.top_k
-        qvec = self._model.encode(
-            [query], normalize_embeddings=True, convert_to_numpy=True
-        ).astype(np.float32)
+        qvec = self._model.encode([query], normalize_embeddings=True, convert_to_numpy=True).astype(
+            np.float32
+        )
         qvec = np.ascontiguousarray(qvec)
         scores, idxs = self._index.search(qvec, k)
         hits: list[RetrievalHit] = []
-        for score, idx in zip(scores[0].tolist(), idxs[0].tolist()):
+        for score, idx in zip(scores[0].tolist(), idxs[0].tolist(), strict=True):
             if idx < 0:
                 continue
             rec = self._records[idx]

@@ -2,10 +2,10 @@
 
 Run via `clg graph init`. Safe to re-run; uses IF NOT EXISTS everywhere.
 """
+
 from __future__ import annotations
 
 from .driver import Neo4jStore, get_store
-from ..config import get_settings
 
 CONSTRAINTS = [
     "CREATE CONSTRAINT jurisdiction_code IF NOT EXISTS FOR (j:Jurisdiction) REQUIRE j.code IS UNIQUE",
@@ -59,7 +59,8 @@ def apply_schema(store: Neo4jStore | None = None) -> dict[str, int]:
         for j in JURISDICTION_SEEDS:
             s.run(
                 "MERGE (j:Jurisdiction {code: $code}) SET j.name = $name",
-                code=j["code"], name=j["name"],
+                code=j["code"],
+                name=j["name"],
             )
             counts["jurisdictions"] += 1
     return counts

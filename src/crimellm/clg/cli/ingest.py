@@ -1,0 +1,115 @@
+"""``clg ingest ...`` — source downloaders."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Annotated
+
+import typer
+
+from ..config import get_settings
+from ..ingest import courtlistener as cl_ingest
+from ..parse import courtlistener as cl_parse
+from ._common import PENDING, cl_raw_dir
+
+app = typer.Typer(help="Source downloaders (Phase 1+).", no_args_is_help=True)
+
+
+@app.command("courtlistener")
+def courtlistener(
+    dump_date: Annotated[str, typer.Option("--date", help="Dump date stamp, e.g. 2024-12-31.")],
+    files: Annotated[
+        str,
+        typer.Option("--files", help="Comma list: courts,dockets,clusters,opinions,citations."),
+    ] = "courts,dockets,clusters,opinions,citations",
+    dest: Annotated[Path | None, typer.Option("--dest")] = None,
+) -> None:
+    """Download CourtListener bulk CSV dumps (resumable)."""
+    selected = [s.strip() for s in files.split(",") if s.strip()]
+    paths = cl_ingest.download_all(dump_date, files=selected, dest_dir=dest)
+    typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
+
+
+@app.command("courtlistener-status")
+def courtlistener_status(
+    dump_date: Annotated[str, typer.Option("--date")],
+    raw_dir: Annotated[Path | None, typer.Option("--raw-dir")] = None,
+) -> None:
+    """Show which CL bulk files are downloaded + the opinion-cluster sidecar."""
+    raw_dir = cl_raw_dir(raw_dir)
+    rows: dict[str, dict[str, object]] = {}
+    for key in cl_ingest.BULK_FILES:
+        p = cl_ingest.file_path(key, dump_date, raw_dir)
+        rows[key] = {
+            "path": str(p),
+            "exists": p.exists(),
+            "size_bytes": p.stat().st_size if p.exists() else 0,
+        }
+    op_path = cl_ingest.file_path("opinions", dump_date, raw_dir)
+    idx = cl_parse.opinion_cluster_index_path(op_path)
+    rows["opcluster_index"] = {
+        "path": str(idx),
+        "exists": idx.exists(),
+        "size_bytes": idx.stat().st_size if idx.exists() else 0,
+    }
+    typer.echo(json.dumps(rows, indent=2))
+
+
+@app.command("courtlistener-index")
+def courtlistener_index(
+    dump_date: Annotated[str, typer.Option("--date")],
+    raw_dir: Annotated[Path | None, typer.Option("--raw-dir")] = None,
+    force: Annotated[
+        bool, typer.Option("--force", help="Rebuild even if the sidecar exists.")
+    ] = False,
+) -> None:
+    """One-shot pass over opinions.csv.bz2 -> slim opinion_id,cluster_id sidecar.
+
+    This is the slow step (tens of GB of bz2). Run once per dump; subsequent
+    `clg load courtlistener` calls skip the re-read.
+    """
+    raw_dir = cl_raw_dir(raw_dir)
+    op_path = cl_ingest.file_path("opinions", dump_date, raw_dir)
+    if not op_path.exists():
+        typer.echo(f"missing opinions file: {op_path}")
+        raise typer.Exit(code=2)
+    idx_path = cl_parse.opinion_cluster_index_path(op_path)
+    if idx_path.exists() and not force:
+        typer.echo(
+            json.dumps(
+                {"already_built": str(idx_path), "size_bytes": idx_path.stat().st_size}, indent=2
+            )
+        )
+        return
+    out = cl_parse.build_opinion_cluster_index(op_path, dest=idx_path, progress=True)
+    typer.echo(json.dumps({"sidecar": str(out), "size_bytes": out.stat().st_size}, indent=2))
+
+
+@app.command("uscode")
+def uscode() -> None:
+    """US Code USLM bulk (Phase 1)."""
+    typer.echo(PENDING)
+    raise typer.Exit(code=1)
+
+
+@app.command("legislation-uk")
+def legislation_uk() -> None:
+    """legislation.gov.uk Acts + point-in-time versions (Phase 2)."""
+    typer.echo(PENDING)
+    raise typer.Exit(code=1)
+
+
+@app.command("find-case-law")
+def find_case_law() -> None:
+    """TNA Find Case Law judgments — requires computational-analysis licence (Phase 2)."""
+    s = get_settings()
+    if not s.tna_computational_licence_accepted:
+        typer.echo(
+            "Refusing: set TNA_COMPUTATIONAL_LICENCE_ACCEPTED=1 after applying for "
+            "the (free) Find Case Law computational-analysis licence. "
+            "See https://caselaw.nationalarchives.gov.uk/"
+        )
+        raise typer.Exit(code=2)
+    typer.echo(PENDING)
+    raise typer.Exit(code=1)

@@ -1,18 +1,6 @@
-"""Shared fixtures: skip Neo4j-dependent tests when the DB is unreachable."""
-from __future__ import annotations
+"""clg-tree fixtures (currently none unique).
 
-import pytest
-
-from crimellm.clg.config import Settings
-from crimellm.clg.graph.driver import Neo4jStore
-
-
-@pytest.fixture(scope="session")
-def neo4j_store() -> Neo4jStore:
-    store = Neo4jStore(Settings())
-    try:
-        store.verify()
-    except Exception as e:
-        pytest.skip(f"Neo4j unreachable at {store.settings.neo4j_uri}: {e}")
-    yield store
-    store.close()
+Shared fixtures (including ``neo4j_store``) live in the top-level
+``tests/conftest.py``. This file stays so subtree-specific fixtures have an
+obvious home as Phase 2+ tests land.
+"""
