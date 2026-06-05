@@ -6,10 +6,10 @@ new field to a dataclass and these loaders pick it up automatically.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Sequence
 from typing import Any
 
-from ..models import Case, Citation, Court, Instrument, Provenance, Provision
+from ..models import Case, Chunk, Citation, Court, Instrument, Provenance, Provision
 from .driver import Neo4jStore, get_store
 
 
@@ -222,6 +222,164 @@ def load_provisions(
             s.run(_CYPHER_PROVISIONS, rows=rows)
             total += len(rows)
     return total
+
+
+# --- Chunk (+ PART_OF + MENTIONS) ------------------------------------------
+
+# Chunks live in the lexical layer. PART_OF points up to the entity that
+# owns the passage (Case or Provision). Embeddings live on Chunk.embedding
+# so the vector index can search them directly.
+_CYPHER_CHUNKS = """
+UNWIND $rows AS row
+MERGE (ch:Chunk {id: row.id})
+  ON CREATE SET ch.text = row.text,
+                ch.parent_id = row.parent_id,
+                ch.parent_type = row.parent_type,
+                ch.embedding_model = row.embedding_model,
+                ch.embedding = row.embedding
+  ON MATCH  SET ch.text = row.text,
+                ch.embedding_model = row.embedding_model,
+                ch.embedding = row.embedding
+WITH ch, row
+CALL (ch, row) {
+  WITH ch, row
+  WHERE row.parent_type = 'Case'
+  MATCH (e:Case {id: row.parent_id})
+  MERGE (ch)-[:PART_OF]->(e)
+}
+CALL (ch, row) {
+  WITH ch, row
+  WHERE row.parent_type = 'Provision'
+  MATCH (e:Provision {id: row.parent_id})
+  MERGE (ch)-[:PART_OF]->(e)
+}
+"""
+
+
+def load_chunks(
+    chunks: Iterable[Chunk],
+    *,
+    embedding_model: str,
+    batch_size: int = 256,
+    store: Neo4jStore | None = None,
+) -> int:
+    """MERGE Chunk nodes + ``PART_OF`` edges in batches.
+
+    Chunks must already carry an ``embedding`` list of floats. Use the
+    Embedder + chunker upstream to populate it; this loader is the dumb
+    sink. ``embedding_model`` is stored on each Chunk so we can audit which
+    backend produced which vector.
+    """
+    store = store or get_store()
+    total = 0
+    with store.session() as s:
+        for batch in _chunks(chunks, batch_size):
+            rows = []
+            for ch in batch:
+                if ch.embedding is None:
+                    raise ValueError(
+                        f"chunk {ch.id} has no embedding; embed before calling load_chunks"
+                    )
+                rows.append(
+                    {
+                        "id": ch.id,
+                        "text": ch.text,
+                        "parent_id": ch.parent_id,
+                        "parent_type": ch.parent_type,
+                        "embedding_model": embedding_model,
+                        "embedding": ch.embedding,
+                    }
+                )
+            s.run(_CYPHER_CHUNKS, rows=rows)
+            total += len(rows)
+    return total
+
+
+# --- Vector search ---------------------------------------------------------
+
+
+def vector_index_dim(store: Neo4jStore | None = None) -> int | None:
+    """Return the ``chunk_embedding`` vector index's configured dimension.
+
+    None when the index is missing or doesn't expose its config (older Neo4j
+    versions). Used to surface dim mismatches with a friendly error before
+    Neo4j blows up mid-query.
+    """
+    store = store or get_store()
+    rows = store.run(
+        "SHOW INDEXES YIELD name, options WHERE name = 'chunk_embedding' RETURN options AS options"
+    )
+    if not rows:
+        return None
+    opts = rows[0].get("options") or {}
+    cfg = opts.get("indexConfig") or {}
+    raw = cfg.get("vector.dimensions")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def search_chunks(
+    query_vector: Sequence[float],
+    *,
+    k: int = 5,
+    jurisdiction: str | None = None,
+    parent_type: str | None = None,
+    store: Neo4jStore | None = None,
+) -> list[dict[str, Any]]:
+    """Top-k vector search over Chunk embeddings, resolved up to parent entity.
+
+    Returns one row per hit with: ``chunk_id``, ``score``, ``text``,
+    ``parent_type``, ``parent_id``, ``parent_name``, ``parent_jurisdiction``,
+    and (for Provision parents) ``section_path`` + ``version_id``.
+
+    Optional filters keep retrieval honest:
+      * ``jurisdiction`` — drop hits whose parent isn't in that jurisdiction.
+      * ``parent_type`` — restrict to ``Case`` or ``Provision``.
+
+    Raises ``ValueError`` up front when the query vector's dimension does
+    not match the ``chunk_embedding`` index — saves the user from reading
+    a Neo4j ``ProcedureCallFailed`` stack trace.
+    """
+    store = store or get_store()
+    expected_dim = vector_index_dim(store)
+    if expected_dim is not None and len(query_vector) != expected_dim:
+        raise ValueError(
+            f"query vector has {len(query_vector)} dimensions but the "
+            f"chunk_embedding index is {expected_dim}-dim. "
+            "Use --backend / --model to match (e.g. --backend st for "
+            "all-MiniLM-L6-v2 at 384-dim), or run "
+            "`clg graph rebuild-vector-index --dim <N>` to retarget the index."
+        )
+    rows = store.run(
+        """
+        CALL db.index.vector.queryNodes('chunk_embedding', $k, $vec)
+        YIELD node, score
+        MATCH (node)-[:PART_OF]->(parent)
+        WITH node, score, parent, labels(parent) AS lbls
+        WHERE ($parent_type IS NULL OR $parent_type IN lbls)
+          AND ($jurisdiction IS NULL OR parent.jurisdiction = $jurisdiction)
+        RETURN node.id AS chunk_id,
+               score,
+               node.text AS text,
+               head(lbls) AS parent_type,
+               parent.id AS parent_id,
+               parent.jurisdiction AS parent_jurisdiction,
+               coalesce(parent.name, parent.short_title, parent.section_path) AS parent_name,
+               parent.section_path AS section_path,
+               parent.version_id AS version_id,
+               parent.decision_date AS decision_date
+        ORDER BY score DESC
+        """,
+        k=k,
+        vec=list(query_vector),
+        parent_type=parent_type,
+        jurisdiction=jurisdiction,
+    )
+    return rows
 
 
 # --- INTERPRETS (Case -> Provision) ----------------------------------------

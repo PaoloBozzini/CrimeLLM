@@ -42,6 +42,31 @@ def _vector_index_cypher(dim: int) -> str:
     )
 
 
+def rebuild_vector_index(
+    dim: int,
+    *,
+    drop_chunks: bool = False,
+    store: Neo4jStore | None = None,
+) -> dict[str, int]:
+    """Drop + recreate ``chunk_embedding`` at a new dimension.
+
+    Use when switching embedder backends with a different vector size — e.g.
+    moving from ``voyage-law-2`` (1024) to ``all-MiniLM-L6-v2`` (384). Old
+    Chunk embeddings stay on disk but the index can no longer use them; you
+    almost always want to ``drop_chunks=True`` and re-embed.
+    """
+    store = store or get_store()
+    deleted = 0
+    with store.session() as s:
+        s.run("DROP INDEX chunk_embedding IF EXISTS")
+        if drop_chunks:
+            r = s.run("MATCH (ch:Chunk) DETACH DELETE ch RETURN count(ch) AS n")
+            row = r.single()
+            deleted = (row["n"] if row else 0) or 0
+        s.run(_vector_index_cypher(dim), dim=dim)
+    return {"dim": dim, "chunks_deleted": int(deleted)}
+
+
 JURISDICTION_SEEDS = [
     {"code": "US", "name": "United States"},
     {"code": "EW", "name": "England & Wales"},

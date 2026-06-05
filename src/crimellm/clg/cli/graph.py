@@ -15,7 +15,9 @@ from ..graph import (
     drop_schema,
     get_store,
     provision_as_of,
+    rebuild_vector_index,
     schema_status,
+    search_chunks,
 )
 
 app = typer.Typer(help="Neo4j schema + admin.", no_args_is_help=True)
@@ -56,6 +58,38 @@ def wipe(
     typer.echo("wiped")
 
 
+@app.command("rebuild-vector-index")
+def rebuild_vector_index_cmd(
+    dim: Annotated[
+        int,
+        typer.Option(
+            "--dim",
+            help="New vector dimension (e.g. 384 for all-MiniLM-L6-v2, 1024 for voyage-law-2).",
+        ),
+    ],
+    drop_chunks: Annotated[
+        bool,
+        typer.Option(
+            "--drop-chunks",
+            help="Also DETACH DELETE existing Chunk nodes. Required when changing dim "
+            "for real, since old embeddings are the wrong size.",
+        ),
+    ] = False,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Confirm destructive flags.")] = False,
+) -> None:
+    """Drop + recreate ``chunk_embedding`` at a new dimension.
+
+    Use after switching embedder backends with a different vector size.
+    Pass ``--drop-chunks --yes`` to also remove stale Chunk nodes; otherwise
+    the existing chunks stay on disk but become un-queryable.
+    """
+    if drop_chunks and not yes:
+        typer.echo("Refusing to delete Chunk nodes without --yes.")
+        raise typer.Exit(code=2)
+    out = rebuild_vector_index(dim, drop_chunks=drop_chunks)
+    typer.echo(json.dumps(out, indent=2))
+
+
 @app.command("drop-schema")
 def drop_schema_cmd(
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
@@ -92,6 +126,46 @@ def counts(
 ) -> None:
     """Inbound + outbound CITES counts for the seed."""
     typer.echo(json.dumps(citation_counts(case_id), indent=2))
+
+
+@app.command("search")
+def search(
+    query: Annotated[str, typer.Argument(help="Free-text query.")],
+    k: Annotated[int, typer.Option("--k", "-k")] = 5,
+    jurisdiction: Annotated[
+        str | None,
+        typer.Option("--jurisdiction", "-j", help="US/EW/UK filter."),
+    ] = None,
+    parent_type: Annotated[
+        str | None,
+        typer.Option("--parent-type", help="Case|Provision filter."),
+    ] = None,
+    backend: Annotated[
+        str | None,
+        typer.Option(
+            "--backend",
+            help="voyage|openai|sentence-transformers|fake. Default = auto.",
+        ),
+    ] = None,
+    model: Annotated[
+        str | None, typer.Option("--model", help="Override the embedder's model name.")
+    ] = None,
+    device: Annotated[
+        str | None, typer.Option("--device", help="Local backends only: cpu|cuda|mps.")
+    ] = None,
+) -> None:
+    """Vector search over Chunk embeddings, resolved up to parent entity."""
+    from ..embed.embedder import get_embedder
+
+    embedder = get_embedder(backend, model=model, device=device)
+    qvec = embedder.embed(query)
+    rows = search_chunks(
+        qvec,
+        k=k,
+        jurisdiction=jurisdiction,
+        parent_type=parent_type,
+    )
+    typer.echo(json.dumps(rows, default=str, indent=2))
 
 
 @app.command("provision-as-of")
