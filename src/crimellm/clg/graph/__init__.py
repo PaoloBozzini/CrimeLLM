@@ -6,6 +6,10 @@ from .loaders import (
     load_cases,
     load_citations,
     load_courts,
+    load_instruments,
+    load_interprets,
+    load_provisions,
+    provision_as_of,
 )
 from .schema import apply_schema, drop_schema, schema_status
 
@@ -18,7 +22,11 @@ __all__ = [
     "load_courts",
     "load_cases",
     "load_citations",
+    "load_instruments",
+    "load_interprets",
+    "load_provisions",
     "citing_cases",
     "cited_cases",
     "citation_counts",
+    "provision_as_of",
 ]

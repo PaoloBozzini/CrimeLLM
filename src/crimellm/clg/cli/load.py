@@ -8,7 +8,12 @@ from typing import Annotated
 
 import typer
 
-from ..graph import get_store, load_cases, load_citations, load_courts
+from ..graph import (
+    get_store,
+    load_cases,
+    load_citations,
+    load_courts,
+)
 from ..ingest import courtlistener as cl_ingest
 from ..parse import courtlistener as cl_parse
 from ._common import cl_raw_dir
@@ -125,3 +130,41 @@ def courtlistener(
             indent=2,
         )
     )
+
+
+@app.command("legislation-uk")
+def legislation_uk(
+    versions: Annotated[
+        str, typer.Option("--versions", help="Comma list, e.g. 'enacted,current,2020-01-01'.")
+    ] = "enacted,current",
+    statutes: Annotated[
+        str | None,
+        typer.Option("--statutes", help="Comma list of slash-form Act ids."),
+    ] = None,
+) -> None:
+    """Parse cached legislation.gov.uk XML and MERGE into Neo4j.
+
+    Run ``clg ingest legislation-uk --versions ...`` first to fetch the XML.
+    Each Act becomes one Instrument node; each section becomes one Provision
+    node per version, with ``valid_from`` set so the temporal as-of query
+    (``clg graph provision-as-of``) returns the right text for any date.
+    """
+    from ..ingest._base import IngestContext
+    from ..ingest.legislation_uk import UK_CRIMINAL_ACTS, LegislationUKSource
+
+    vs = tuple(v.strip() for v in versions.split(",") if v.strip())
+    if statutes:
+        triples = tuple(
+            (parts[0], int(parts[1]), int(parts[2]))
+            for s in statutes.split(",")
+            for parts in [s.strip().split("/")]
+        )
+    else:
+        triples = UK_CRIMINAL_ACTS
+
+    store = get_store()
+    store.verify()
+    src = LegislationUKSource(statutes=triples, versions=vs)
+    ctx = IngestContext(store=store)
+    report = src.load(ctx)
+    typer.echo(json.dumps({"source": report.source, **report.counts, **report.extras}, indent=2))

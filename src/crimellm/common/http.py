@@ -25,10 +25,16 @@ def get_with_retry(
     params: dict | None = None,
     max_retries: int = 4,
     timeout: float = 60.0,
+    follow_redirects: bool = True,
 ) -> httpx.Response:
-    """GET with exponential backoff on 429 (honours `Retry-After`)."""
+    """GET with exponential backoff on 429 (honours ``Retry-After``).
+
+    Follows redirects by default — legislation.gov.uk for example serves
+    pre-1963 Acts under regnal-year URIs and 301-redirects from the modern
+    ``/<year>/<number>`` form.
+    """
     for attempt in range(max_retries + 1):
-        r = client.get(url, params=params, timeout=timeout)
+        r = client.get(url, params=params, timeout=timeout, follow_redirects=follow_redirects)
         if r.status_code == 429 and attempt < max_retries:
             wait = float(r.headers.get("Retry-After") or 2**attempt)
             tqdm.write(f"[http] 429 on {url} -- sleep {wait}s (attempt {attempt + 1})")

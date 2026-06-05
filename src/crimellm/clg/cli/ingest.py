@@ -94,10 +94,48 @@ def uscode() -> None:
 
 
 @app.command("legislation-uk")
-def legislation_uk() -> None:
-    """legislation.gov.uk Acts + point-in-time versions (Phase 2)."""
-    typer.echo(PENDING)
-    raise typer.Exit(code=1)
+def legislation_uk(
+    versions: Annotated[
+        str,
+        typer.Option(
+            "--versions",
+            help=(
+                "Comma list of version labels. Defaults to 'enacted,current'. "
+                "Use 'enacted', 'current', or ISO dates like '2020-01-01'."
+            ),
+        ),
+    ] = "enacted,current",
+    statutes: Annotated[
+        str | None,
+        typer.Option(
+            "--statutes",
+            help=(
+                "Comma list of slash-form Act ids (e.g. 'ukpga/2006/35,ukpga/1968/60'). "
+                "Defaults to the UK_CRIMINAL_ACTS bundle."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Download UK Acts (whole-act CLML XML) for each requested version."""
+    from ..ingest._base import IngestContext
+    from ..ingest.legislation_uk import (
+        UK_CRIMINAL_ACTS,
+        LegislationUKSource,
+    )
+
+    vs = tuple(v.strip() for v in versions.split(",") if v.strip())
+    if statutes:
+        triples = tuple(
+            (parts[0], int(parts[1]), int(parts[2]))
+            for s in statutes.split(",")
+            for parts in [s.strip().split("/")]
+        )
+    else:
+        triples = UK_CRIMINAL_ACTS
+
+    src = LegislationUKSource(statutes=triples, versions=vs)
+    paths = src.download(IngestContext())
+    typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
 
 
 @app.command("find-case-law")

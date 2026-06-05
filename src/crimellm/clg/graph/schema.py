@@ -21,8 +21,14 @@ CONSTRAINTS = [
 INDEXES = [
     "CREATE INDEX case_jurisdiction IF NOT EXISTS FOR (c:Case) ON (c.jurisdiction)",
     "CREATE INDEX case_decision_date IF NOT EXISTS FOR (c:Case) ON (c.decision_date)",
+    "CREATE INDEX instrument_jurisdiction IF NOT EXISTS FOR (i:Instrument) ON (i.jurisdiction)",
     "CREATE INDEX provision_valid_from IF NOT EXISTS FOR (p:Provision) ON (p.valid_from)",
     "CREATE INDEX provision_section_path IF NOT EXISTS FOR (p:Provision) ON (p.section_path)",
+    "CREATE INDEX provision_instrument IF NOT EXISTS FOR (p:Provision) ON (p.instrument_id)",
+    (
+        "CREATE INDEX provision_section_lookup IF NOT EXISTS "
+        "FOR (p:Provision) ON (p.instrument_id, p.section_path, p.valid_from)"
+    ),
 ]
 
 

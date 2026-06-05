@@ -14,6 +14,7 @@ from ..graph import (
     citing_cases,
     drop_schema,
     get_store,
+    provision_as_of,
     schema_status,
 )
 
@@ -91,3 +92,17 @@ def counts(
 ) -> None:
     """Inbound + outbound CITES counts for the seed."""
     typer.echo(json.dumps(citation_counts(case_id), indent=2))
+
+
+@app.command("provision-as-of")
+def provision_as_of_cmd(
+    instrument_id: Annotated[
+        str,
+        typer.Option("--instrument", "-i", help="Instrument id, e.g. uk/ukpga/2006/35."),
+    ],
+    section: Annotated[str, typer.Option("--section", "-s", help="Section path, e.g. s.1.")],
+    as_of: Annotated[str, typer.Option("--as-of", help="ISO date (YYYY-MM-DD).")],
+) -> None:
+    """Return the Provision text valid on the given date."""
+    row = provision_as_of(instrument_id, section, as_of)
+    typer.echo(json.dumps(row, default=str, indent=2))
