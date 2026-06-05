@@ -13,3 +13,5 @@ build/
 data/corpora/
 .env
 .env.local
+*.local.*
+data/

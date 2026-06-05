@@ -153,6 +153,41 @@ Corpus JSONL — one record per line:
 
 `crimellm.device.resolve_device()` picks **CUDA → MPS → CPU**. `training_kwargs_for_device()` injects per-backend `TrainingArguments` (bf16/fp16 on NVIDIA, fp32 on MPS, disables `pin_memory` off-CUDA). `AirLLMClassifier` routes to MLX on Darwin and to CUDA elsewhere.
 
+## `clg` — Common Legal Graph (Neo4j RAG, in progress)
+
+Graph-backed retrieval over US + UK primary law. The graph encodes the citation-and-treatment network plus point-in-time legislation, so the pipeline can answer multi-hop, "is this still good law?", and "as of date X" questions that flat vector RAG cannot. Lives in `src/crimellm/clg/` alongside the existing FAISS retriever.
+
+### Setup
+
+```bash
+docker compose up -d neo4j        # Neo4j 5.x (community) on bolt://localhost:7687
+make install                      # uv sync --extra clg --extra dev
+cp .env.example .env              # fill in NEO4J_PASSWORD, VOYAGE_API_KEY, ANTHROPIC_API_KEY
+uv run clg graph init             # constraints + vector index + jurisdiction seeds
+uv run clg graph status
+uv run pytest -q
+```
+
+Browse Neo4j at http://localhost:7474 (user `neo4j`, password from `.env`).
+
+### CLI surface (Phase 0 — most subcommands are stubs)
+
+```
+clg graph init | status | wipe --yes | drop-schema --yes
+clg ingest courtlistener | uscode | legislation-uk | find-case-law
+clg parse  uslm | akoma-ntoso
+clg link   citations | treatment
+clg embed
+clg query "..." --jurisdiction EW --as-of 2021-06-01
+clg eval
+```
+
+### Source-data licences (read before bulk-fetching)
+
+- **CourtListener / CAP / US Code / eCFR** — permissive; be polite on rate limits.
+- **legislation.gov.uk** — Open Government Licence v3.0; no key required.
+- **Find Case Law (TNA)** — reading is open under the Open Justice Licence, but **programmatic bulk extraction or enrichment requires applying for the (free) computational-analysis licence**. The `clg ingest find-case-law` downloader refuses to run until `TNA_COMPUTATIONAL_LICENCE_ACCEPTED=1` is set in `.env`. Rate limit: ~1,000 requests / 5 min.
+
 ## License
 
 MIT — see `LICENSE`.

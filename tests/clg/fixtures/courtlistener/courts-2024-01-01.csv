@@ -1,0 +1,5 @@
+id,full_name,short_name,position,parent_court_id,jurisdiction
+scotus,Supreme Court of the United States,SCOTUS,1,,F
+ca9,United States Court of Appeals for the Ninth Circuit,9th Cir.,2,scotus,F
+nysd,United States District Court for the Southern District of New York,S.D.N.Y.,3,ca9,FD
+cand,United States District Court for the Northern District of California,N.D. Cal.,3,ca9,FD

@@ -29,13 +29,13 @@ from typing import Any, Iterable, Iterator
 import httpx
 from tqdm import tqdm
 
+from ._http import UA, get_with_retry as _get_with_retry, write_jsonl as _write_jsonl_shared
 from .env import load_env
 
 GOVINFO_API = "https://api.govinfo.gov"
 GOVINFO_CONTENT = "https://www.govinfo.gov/content/pkg"
 COURTLISTENER_API = "https://www.courtlistener.com/api/rest/v4"
 LEG_UK = "https://www.legislation.gov.uk"
-UA = {"User-Agent": "crimellm-rag/0.1"}
 
 LEG_UK_NS = {
     "leg": "http://www.legislation.gov.uk/namespaces/legislation",
@@ -63,37 +63,13 @@ def _ws(s: str | None) -> str:
 
 
 def _write_jsonl(records: list[dict[str, Any]], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    _write_jsonl_shared(records, path)
 
 
 def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
     """Read a JSONL corpus file produced by the ingestion helpers."""
     with open(path, encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
-
-
-def _get_with_retry(
-    client: httpx.Client,
-    url: str,
-    *,
-    params: dict | None = None,
-    max_retries: int = 4,
-) -> httpx.Response:
-    """GET with exponential backoff on 429 (honors `Retry-After` when present)."""
-    for attempt in range(max_retries + 1):
-        r = client.get(url, params=params, timeout=60.0)
-        if r.status_code == 429 and attempt < max_retries:
-            wait = float(r.headers.get("Retry-After") or 2 ** attempt)
-            tqdm.write(f"[corpora] 429 on {url} -- sleep {wait}s (attempt {attempt+1})")
-            time.sleep(wait)
-            continue
-        r.raise_for_status()
-        return r
-    r.raise_for_status()
-    return r
 
 
 # --- US Code: USLM XML parser -----------------------------------------------
