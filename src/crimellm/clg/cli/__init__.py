@@ -158,12 +158,93 @@ def embed_cmd(
 @app.command("query")
 def query_cmd(
     question: Annotated[str, typer.Argument(help="Question to ask.")],
-    jurisdiction: Annotated[str | None, typer.Option("--jurisdiction", "-j")] = None,
-    as_of: Annotated[str | None, typer.Option("--as-of", help="ISO date, default today.")] = None,
+    jurisdiction: Annotated[
+        str | None,
+        typer.Option(
+            "--jurisdiction",
+            "-j",
+            help="US|EW|UK. Default = infer from the question.",
+        ),
+    ] = None,
+    as_of: Annotated[str | None, typer.Option("--as-of", help="ISO date. Default = today.")] = None,
+    seed_k: Annotated[int, typer.Option("--seed-k", help="Vector-search seeds.")] = 8,
+    top_k: Annotated[int, typer.Option("--top-k", help="Candidates kept after rerank.")] = 6,
+    embedder_backend: Annotated[
+        str | None,
+        typer.Option(
+            "--backend",
+            help="Embedder backend: voyage|openai|sentence-transformers|fake.",
+        ),
+    ] = None,
+    synthesizer: Annotated[
+        str | None,
+        typer.Option(
+            "--synth",
+            help=(
+                "Synthesizer: anthropic|ollama|airllm|fake. "
+                "Default: anthropic if ANTHROPIC_API_KEY set, else ollama "
+                "if its server is reachable, else fake."
+            ),
+        ),
+    ] = None,
+    synth_model: Annotated[
+        str | None,
+        typer.Option(
+            "--synth-model",
+            help=(
+                "Synthesizer model override (e.g. 'qwen2.5:14b-instruct' for ollama, "
+                "'Qwen/Qwen2.5-7B-Instruct' for airllm, 'claude-opus-4-7' for anthropic)."
+            ),
+        ),
+    ] = None,
+    json_out: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Emit the Answer as JSON (text + citations + caveats + used).",
+        ),
+    ] = False,
 ) -> None:
-    """Grounded answer via graph traversal (Phase 4)."""
-    typer.echo(PENDING)
-    raise typer.Exit(code=1)
+    """Grounded answer via graph traversal (Phase 4).
+
+    Flow: parse question -> seed by vector search -> traverse the graph
+    (cited/citing, INTERPRETS, as-of-date Provision versions) -> good-law
+    check on Cases -> rerank -> synthesise with strict citation discipline.
+
+    When ``--json`` is passed you get the full structured Answer; otherwise
+    plain text + bulleted caveats + the list of used identifiers.
+    """
+    import json as _json
+
+    from ..retrieval import run_query
+    from ..retrieval.synthesize import get_synthesizer
+
+    # Build the synthesizer up-front so --synth-model is honoured.
+    synth = get_synthesizer(synthesizer, model=synth_model)
+
+    answer = run_query(
+        question,
+        jurisdiction=jurisdiction,  # type: ignore[arg-type]
+        as_of=as_of,
+        seed_k=seed_k,
+        top_k=top_k,
+        embedder_backend=embedder_backend,
+        synthesizer=synth,
+    )
+
+    if json_out:
+        typer.echo(_json.dumps(answer.to_dict(), default=str, indent=2))
+        return
+
+    typer.echo(answer.text)
+    if answer.caveats:
+        typer.echo("\nCaveats:")
+        for cv in answer.caveats:
+            typer.echo(f"  - {cv}")
+    if answer.citations:
+        typer.echo("\nCited:")
+        for c in answer.citations:
+            typer.echo(f"  - {c}")
 
 
 @app.command("eval")
