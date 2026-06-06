@@ -248,10 +248,87 @@ def query_cmd(
 
 
 @app.command("eval")
-def eval_cmd() -> None:
-    """Run gold-set evaluation (Phase 6)."""
-    typer.echo(PENDING)
-    raise typer.Exit(code=1)
+def eval_cmd(
+    gold_set: Annotated[
+        str,
+        typer.Option(
+            "--gold-set",
+            "-g",
+            help="Path to a YAML gold set (e.g. data/eval/seed.yaml).",
+        ),
+    ],
+    embedder_backend: Annotated[
+        str | None,
+        typer.Option(
+            "--backend",
+            help="Embedder backend: voyage|openai|sentence-transformers|fake.",
+        ),
+    ] = None,
+    synthesizer: Annotated[
+        str | None,
+        typer.Option(
+            "--synth",
+            help="Synthesizer: anthropic|ollama|airllm|fake.",
+        ),
+    ] = None,
+    synth_model: Annotated[str | None, typer.Option("--synth-model")] = None,
+    seed_k: Annotated[int, typer.Option("--seed-k")] = 8,
+    top_k: Annotated[int, typer.Option("--top-k")] = 6,
+    fmt: Annotated[
+        str,
+        typer.Option(
+            "--format",
+            "-f",
+            help="md (default) | json.",
+        ),
+    ] = "md",
+    out: Annotated[
+        str | None,
+        typer.Option(
+            "--out",
+            "-o",
+            help="Write report to this path. Default: stdout.",
+        ),
+    ] = None,
+    include_answers: Annotated[
+        bool,
+        typer.Option(
+            "--include-answers",
+            help="JSON output only: embed each Answer in the report.",
+        ),
+    ] = False,
+) -> None:
+    """Run a gold-set evaluation and emit a report (Phase 6)."""
+    from pathlib import Path as _Path
+
+    from ..embed.embedder import get_embedder
+    from ..eval import load_gold_set, run_eval, to_json, to_markdown
+    from ..retrieval.synthesize import get_synthesizer
+
+    embedder = get_embedder(embedder_backend)
+    synth = get_synthesizer(synthesizer, model=synth_model)
+    gold = load_gold_set(gold_set)
+
+    report = run_eval(
+        gold,
+        embedder=embedder,
+        synthesizer=synth,
+        seed_k=seed_k,
+        top_k=top_k,
+    )
+
+    if fmt.lower() == "json":
+        body = to_json(report, include_answers=include_answers)
+    elif fmt.lower() in {"md", "markdown"}:
+        body = to_markdown(report)
+    else:
+        raise typer.BadParameter(f"unknown --format {fmt!r}; pick md / json")
+
+    if out:
+        _Path(out).write_text(body, encoding="utf-8")
+        typer.echo(f"wrote {out}")
+    else:
+        typer.echo(body)
 
 
 if __name__ == "__main__":
