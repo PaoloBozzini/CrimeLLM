@@ -8,6 +8,7 @@ subpackage holds the graph-RAG pipeline; the two coexist and share
 ``crimellm.common`` + ``crimellm.env``.
 """
 
+from ..common.device import resolve_device, training_kwargs_for_device  # re-export for back-compat
 from .config import Config
 from .corpora import (
     UK_CRIMINAL_ACTS,
@@ -20,7 +21,6 @@ from .corpora import (
     parse_us_code,
 )
 from .data import load_dataset_from_csv, load_sample_dataset
-from .device import resolve_device, training_kwargs_for_device
 from .embed_probe import ProbeResult, encode_texts, linear_probe
 from .inference import Classifier
 from .rag import LegalRetriever, RetrievalHit

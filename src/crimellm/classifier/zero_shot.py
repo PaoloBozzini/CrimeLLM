@@ -249,7 +249,7 @@ class AirLLMClassifier:
             if _platform.system() == "Darwin":
                 device = "mlx"
             else:
-                from .device import resolve_device
+                from ..common.device import resolve_device
 
                 device = resolve_device().backend  # cuda / cpu (mps not used by AirLLM)
 

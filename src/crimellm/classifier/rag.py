@@ -132,7 +132,7 @@ class LegalRetriever:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
-            from .device import resolve_device
+            from ..common.device import resolve_device
 
             backend = resolve_device().backend
             st_device = backend if backend in {"cuda", "mps", "cpu"} else "cpu"

@@ -1,68 +1,29 @@
+"""Deprecated shim. Re-exports the device helpers from ``crimellm.common.device``.
+
+``device.py`` used to live in ``classifier/`` because it was first written for
+the fine-tune pipeline. The CUDA/MPS/CPU detection is generic — the clg
+distillation tier and any future ML stack want the same logic. The canonical
+module is now ``crimellm.common.device``.
+
+Scheduled for removal in v0.3.
+"""
+
 from __future__ import annotations
 
-import platform
-from dataclasses import dataclass
+import warnings
 
-import torch
+from ..common.device import (  # noqa: F401
+    DeviceInfo,
+    resolve_device,
+    training_kwargs_for_device,
+)
 
+warnings.warn(
+    "crimellm.classifier.device is deprecated; import from "
+    "crimellm.common.device (or crimellm.classifier — back-compat re-export) "
+    "instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
-@dataclass
-class DeviceInfo:
-    device: torch.device
-    backend: str  # "cuda" | "mps" | "cpu"
-    name: str
-    supports_fp16: bool
-    supports_bf16: bool
-
-    def __str__(self) -> str:
-        return f"{self.backend}:{self.name} (fp16={self.supports_fp16}, bf16={self.supports_bf16})"
-
-
-def resolve_device() -> DeviceInfo:
-    """Pick best available device. CUDA > MPS > CPU."""
-    if torch.cuda.is_available():
-        idx = 0
-        name = torch.cuda.get_device_name(idx)
-        major, _ = torch.cuda.get_device_capability(idx)
-        return DeviceInfo(
-            device=torch.device(f"cuda:{idx}"),
-            backend="cuda",
-            name=name,
-            supports_fp16=True,
-            supports_bf16=major >= 8,  # Ampere+ has native bf16
-        )
-    if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-        return DeviceInfo(
-            device=torch.device("mps"),
-            backend="mps",
-            name=f"Apple Silicon ({platform.machine()})",
-            supports_fp16=False,  # mixed-precision on MPS is flaky for training
-            supports_bf16=False,
-        )
-    return DeviceInfo(
-        device=torch.device("cpu"),
-        backend="cpu",
-        name=platform.processor() or platform.machine() or "cpu",
-        supports_fp16=False,
-        supports_bf16=False,
-    )
-
-
-def training_kwargs_for_device(info: DeviceInfo | None = None) -> dict:
-    """Per-backend HuggingFace TrainingArguments kwargs."""
-    info = info or resolve_device()
-    kwargs: dict = {}
-    if info.backend == "cuda":
-        # bf16 is more numerically stable, prefer when available.
-        if info.supports_bf16:
-            kwargs["bf16"] = True
-        else:
-            kwargs["fp16"] = True
-        kwargs["dataloader_pin_memory"] = True
-    elif info.backend == "mps":
-        # Keep fp32 on MPS (mixed-precision is unstable). Trainer auto-detects MPS;
-        # just disable pin_memory (CUDA-only feature).
-        kwargs["dataloader_pin_memory"] = False
-    else:
-        kwargs["dataloader_pin_memory"] = False
-    return kwargs
+__all__ = ["DeviceInfo", "resolve_device", "training_kwargs_for_device"]

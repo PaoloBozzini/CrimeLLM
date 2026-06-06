@@ -5,7 +5,7 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-from .device import resolve_device
+from ..common.device import resolve_device
 
 
 class Classifier:

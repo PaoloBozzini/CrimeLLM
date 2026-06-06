@@ -14,8 +14,8 @@ from transformers import (
     TrainingArguments,
 )
 
+from ..common.device import resolve_device, training_kwargs_for_device
 from .config import Config
-from .device import resolve_device, training_kwargs_for_device
 
 
 @dataclass

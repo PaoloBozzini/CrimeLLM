@@ -70,7 +70,7 @@ class DistilledTreatmentClassifier(TreatmentClassifier):
 
         if device is None:
             try:
-                from ..classifier.device import resolve_device  # type: ignore
+                from ...common.device import resolve_device  # type: ignore
 
                 device = resolve_device().backend
             except Exception:  # noqa: BLE001
