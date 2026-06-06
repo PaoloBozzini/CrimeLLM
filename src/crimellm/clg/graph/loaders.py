@@ -149,6 +149,85 @@ def load_citations(
     return total
 
 
+# --- CITES.treatment streaming + writeback (Phase 5.3) --------------------
+
+
+def iter_neutral_cites(
+    *,
+    only_with_sentence: bool = False,
+    jurisdiction: str | None = None,
+    limit: int | None = None,
+    store: Neo4jStore | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Stream ``CITES`` edges that still need classification.
+
+    Yields dicts shaped for ``link.treatment_base.EdgeContext`` (plus the
+    ``edge_id`` Neo4j surrogate so the writeback knows which edge to update).
+    """
+    store = store or get_store()
+    where_clauses = [
+        "r.treatment IS NULL OR r.treatment = 'neutral'",
+    ]
+    if only_with_sentence:
+        where_clauses.append("coalesce(r.citing_sentence, '') <> ''")
+    if jurisdiction:
+        where_clauses.append("citing.jurisdiction = $j AND cited.jurisdiction = $j")
+    where = " AND ".join(where_clauses)
+    cypher = (
+        f"MATCH (citing:Case)-[r:CITES]->(cited:Case) WHERE {where} "
+        "RETURN id(r) AS edge_id, "
+        "       citing.id AS citing_case_id, citing.name AS citing_case_name, "
+        "       citing.decision_date AS citing_decision_date, "
+        "       cited.id AS cited_case_id, cited.name AS cited_case_name, "
+        "       cited.decision_date AS cited_decision_date, "
+        "       coalesce(r.citing_sentence, '') AS citing_sentence, "
+        "       coalesce(r.weight, 1.0) AS depth"
+    )
+    if limit:
+        cypher += f" LIMIT {int(limit)}"
+
+    with store.session() as s:
+        params: dict[str, Any] = {}
+        if jurisdiction:
+            params["j"] = jurisdiction
+        for row in s.run(cypher, **params):
+            yield dict(row)
+
+
+_CYPHER_WRITE_TREATMENT = """
+UNWIND $rows AS row
+MATCH ()-[r:CITES]->()
+WHERE id(r) = row.edge_id
+SET r.treatment = row.treatment,
+    r.treatment_source = row.treatment_source,
+    r.treatment_confidence = row.treatment_confidence,
+    r.treatment_updated_at = datetime()
+"""
+
+
+def write_treatments(
+    rows: Iterable[dict[str, Any]],
+    *,
+    batch_size: int = 1000,
+    store: Neo4jStore | None = None,
+) -> int:
+    """Persist cascade results back onto each ``CITES`` edge.
+
+    Each row is ``{edge_id, treatment, treatment_source, treatment_confidence}``.
+    The cascade orchestrator's output maps cleanly onto this shape.
+    """
+    store = store or get_store()
+    total = 0
+    with store.session() as s:
+        for batch in _chunks(rows, batch_size):
+            payload = list(batch)
+            if not payload:
+                continue
+            s.run(_CYPHER_WRITE_TREATMENT, rows=payload)
+            total += len(payload)
+    return total
+
+
 # --- Instrument ------------------------------------------------------------
 
 _CYPHER_INSTRUMENTS = """

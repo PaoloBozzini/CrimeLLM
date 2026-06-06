@@ -3,6 +3,7 @@ from .loaders import (
     citation_counts,
     cited_cases,
     citing_cases,
+    iter_neutral_cites,
     load_cases,
     load_chunks,
     load_citations,
@@ -12,6 +13,7 @@ from .loaders import (
     load_provisions,
     provision_as_of,
     search_chunks,
+    write_treatments,
 )
 from .schema import apply_schema, drop_schema, rebuild_vector_index, schema_status
 
@@ -33,5 +35,7 @@ __all__ = [
     "citing_cases",
     "cited_cases",
     "citation_counts",
+    "iter_neutral_cites",
+    "write_treatments",
     "provision_as_of",
 ]

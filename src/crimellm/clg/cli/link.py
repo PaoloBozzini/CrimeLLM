@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from typing import Annotated
+
 import typer
 
 from ._common import PENDING
@@ -16,8 +19,232 @@ def citations() -> None:
     raise typer.Exit(code=1)
 
 
+def _build_cascade(
+    backends: list[str],
+    *,
+    confidence_threshold: float,
+    ollama_model: str | None,
+    anthropic_model: str | None,
+    distilled_dir: str | None,
+    max_claude_edges: int | None,
+):
+    """Translate the ``--backend rules+distilled+ollama+anthropic`` flag.
+
+    Missing optional deps (the [classifier] / anthropic / ollama bits) cause
+    the offending tier to be skipped with a stderr note rather than a hard
+    error — Phase 5.3 is meant to run partially when only some tiers are
+    available.
+    """
+    from ..link import (
+        CascadeClassifier,
+        ClaudeTreatmentClassifier,
+        DistilledTreatmentClassifier,
+        OllamaTreatmentClassifier,
+        RuleTreatmentClassifier,
+    )
+
+    tiers = []
+    for name in backends:
+        name = name.strip().lower()
+        if name == "rules":
+            tiers.append((RuleTreatmentClassifier(), confidence_threshold))
+        elif name == "distilled":
+            if not distilled_dir:
+                typer.secho(
+                    "[skip] distilled tier: pass --distilled-dir to use it.",
+                    err=True,
+                    fg="yellow",
+                )
+                continue
+            try:
+                tiers.append(
+                    (
+                        DistilledTreatmentClassifier(model_dir=distilled_dir),
+                        confidence_threshold,
+                    )
+                )
+            except (ImportError, FileNotFoundError) as e:
+                typer.secho(f"[skip] distilled tier: {e}", err=True, fg="yellow")
+        elif name == "ollama":
+            tiers.append(
+                (
+                    OllamaTreatmentClassifier(
+                        model=ollama_model or "qwen2.5:7b-instruct",
+                    ),
+                    confidence_threshold,
+                )
+            )
+        elif name == "anthropic":
+            try:
+                claude = ClaudeTreatmentClassifier(
+                    model=anthropic_model or "claude-haiku-4-5-20251001",
+                )
+            except (ImportError, RuntimeError) as e:
+                typer.secho(f"[skip] anthropic tier: {e}", err=True, fg="yellow")
+                continue
+            tiers.append((claude, confidence_threshold))
+        else:
+            raise typer.BadParameter(
+                f"unknown backend {name!r}; pick rules/distilled/ollama/anthropic"
+            )
+
+    if not tiers:
+        raise typer.BadParameter(
+            "no tiers active; check --backend and that the relevant extras are installed"
+        )
+
+    budget = {"anthropic": max_claude_edges} if max_claude_edges else None
+    return CascadeClassifier(tiers, budget_per_tier=budget)
+
+
 @app.command("treatment")
-def treatment() -> None:
-    """Classify treatment via the cascade (rules -> distilled -> local LLM -> Claude). Phase 5."""
-    typer.echo(PENDING)
-    raise typer.Exit(code=1)
+def treatment(
+    backend: Annotated[
+        str,
+        typer.Option(
+            "--backend",
+            help=(
+                "Comma-or-plus list, ordered cheapest first. "
+                "Pick from rules / distilled / ollama / anthropic."
+            ),
+        ),
+    ] = "rules+ollama",
+    confidence_threshold: Annotated[
+        float,
+        typer.Option(
+            "--confidence-threshold",
+            "-t",
+            help="Minimum confidence for a tier's result to be accepted (else escalate).",
+        ),
+    ] = 0.85,
+    only_with_sentence: Annotated[
+        bool,
+        typer.Option(
+            "--only-with-sentence",
+            help="Skip edges that have no citing_sentence (rules + distilled abstain anyway).",
+        ),
+    ] = False,
+    jurisdiction: Annotated[
+        str | None, typer.Option("--jurisdiction", "-j", help="Restrict to one jurisdiction.")
+    ] = None,
+    max_edges: Annotated[
+        int | None,
+        typer.Option("--max-edges", help="Cap total edges processed this run (resumable)."),
+    ] = None,
+    batch_size: Annotated[int, typer.Option("--batch-size")] = 32,
+    ollama_model: Annotated[str | None, typer.Option("--ollama-model")] = None,
+    anthropic_model: Annotated[str | None, typer.Option("--anthropic-model")] = None,
+    distilled_dir: Annotated[
+        str | None,
+        typer.Option(
+            "--distilled-dir",
+            help="Path to the trained distilled head (output of `clg link train-distilled`).",
+        ),
+    ] = None,
+    max_claude_edges: Annotated[
+        int | None,
+        typer.Option(
+            "--max-claude-edges",
+            help="Budget cap on Claude escalation tier across this run.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Run the cascade but do not write treatments back to Neo4j.",
+        ),
+    ] = False,
+) -> None:
+    """Stream un-classified ``CITES`` edges through the cascade and write back.
+
+    Resumable. Re-running picks up only edges still at ``treatment=neutral``
+    (or NULL). Per-tier counts + total written are emitted at the end.
+    """
+    from ..graph import get_store, iter_neutral_cites, write_treatments
+    from ..link import EdgeContext
+
+    backends = [b for b in backend.replace("+", ",").split(",") if b.strip()]
+    cascade = _build_cascade(
+        backends,
+        confidence_threshold=confidence_threshold,
+        ollama_model=ollama_model,
+        anthropic_model=anthropic_model,
+        distilled_dir=distilled_dir,
+        max_claude_edges=max_claude_edges,
+    )
+
+    store = get_store()
+    store.verify()
+
+    by_tier: dict[str, int] = {}
+    total = 0
+    written = 0
+
+    def _flush(batch_rows: list[dict]) -> None:
+        nonlocal written
+        nonlocal by_tier
+        edges = [
+            EdgeContext(
+                citing_case_id=r["citing_case_id"],
+                cited_case_id=r["cited_case_id"],
+                citing_sentence=r.get("citing_sentence", "") or "",
+                citing_case_name=r.get("citing_case_name", "") or "",
+                cited_case_name=r.get("cited_case_name", "") or "",
+                citing_decision_date=str(r.get("citing_decision_date"))
+                if r.get("citing_decision_date")
+                else None,
+                cited_decision_date=str(r.get("cited_decision_date"))
+                if r.get("cited_decision_date")
+                else None,
+                depth=float(r.get("depth") or 1.0),
+            )
+            for r in batch_rows
+        ]
+        report = cascade.classify(edges)
+        for tier, count in report.by_tier().items():
+            by_tier[tier] = by_tier.get(tier, 0) + count
+
+        if dry_run:
+            return
+
+        write_rows = [
+            {
+                "edge_id": batch_rows[i]["edge_id"],
+                "treatment": report.results[i].label,
+                "treatment_source": report.results[i].source,
+                "treatment_confidence": float(report.results[i].confidence),
+            }
+            for i in range(len(batch_rows))
+        ]
+        write_treatments(write_rows, store=store)
+        written += len(write_rows)
+
+    pending: list[dict] = []
+    for row in iter_neutral_cites(
+        only_with_sentence=only_with_sentence,
+        jurisdiction=jurisdiction,
+        limit=max_edges,
+        store=store,
+    ):
+        pending.append(row)
+        total += 1
+        if len(pending) >= batch_size:
+            _flush(pending)
+            pending = []
+    if pending:
+        _flush(pending)
+
+    typer.echo(
+        json.dumps(
+            {
+                "total_edges": total,
+                "written": written,
+                "dry_run": dry_run,
+                "tier_counts": by_tier,
+                "backends": backends,
+                "confidence_threshold": confidence_threshold,
+            },
+            indent=2,
+        )
+    )
