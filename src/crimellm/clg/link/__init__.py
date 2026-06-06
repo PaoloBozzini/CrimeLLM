@@ -8,6 +8,19 @@ Orchestrator: ``treatment_cascade.CascadeClassifier`` with per-tier thresholds.
 """
 
 from .citation_context import extract_citing_sentence
+from .distill import (
+    DistillSample,
+    label_distribution,
+    label_with_teacher,
+    sample_edges,
+    write_training_csv,
+)
+from .train_distilled import (
+    DistillTrainResult,
+    classification_report_text,
+    teacher_agreement,
+    train_distilled_head,
+)
 from .treatment_anthropic import ClaudeTreatmentClassifier
 from .treatment_base import (
     ID_TO_LABEL,
@@ -39,4 +52,13 @@ __all__ = [
     "CascadeReport",
     "CascadeTelemetry",
     "extract_citing_sentence",
+    "DistillSample",
+    "sample_edges",
+    "label_with_teacher",
+    "write_training_csv",
+    "label_distribution",
+    "DistillTrainResult",
+    "train_distilled_head",
+    "classification_report_text",
+    "teacher_agreement",
 ]

@@ -19,6 +19,182 @@ def citations() -> None:
     raise typer.Exit(code=1)
 
 
+@app.command("distill")
+def distill(
+    sample: Annotated[
+        int,
+        typer.Option(
+            "--sample",
+            "-n",
+            help="Number of edges to sample + label with the teacher.",
+        ),
+    ] = 1000,
+    out: Annotated[
+        str,
+        typer.Option("--out", "-o", help="CSV destination."),
+    ] = "data/training/treatment.csv",
+    teacher: Annotated[
+        str,
+        typer.Option(
+            "--teacher",
+            help="anthropic | ollama. Anthropic = best quality, ~$30 for 50k labels.",
+        ),
+    ] = "anthropic",
+    teacher_model: Annotated[
+        str | None,
+        typer.Option(
+            "--teacher-model",
+            help="Override the teacher's model.",
+        ),
+    ] = None,
+    only_with_sentence: Annotated[
+        bool,
+        typer.Option(
+            "--only-with-sentence/--allow-empty-sentence",
+            help="Skip edges with no citing_sentence (they teach the student nothing).",
+        ),
+    ] = True,
+    jurisdiction: Annotated[
+        str | None,
+        typer.Option("--jurisdiction", "-j", help="US|EW|UK filter."),
+    ] = None,
+    seed: Annotated[int, typer.Option("--seed")] = 42,
+    batch_size: Annotated[int, typer.Option("--batch-size")] = 16,
+) -> None:
+    """Sample edges from Neo4j, label them with a teacher, write a training CSV.
+
+    The CSV's schema (``text,label,label_str,confidence,teacher,citing_case_id,
+    cited_case_id``) drops straight into ``crimellm.classifier.load_dataset_from_csv``.
+    """
+    from ..link import (
+        ClaudeTreatmentClassifier,
+        OllamaTreatmentClassifier,
+        label_distribution,
+        label_with_teacher,
+        sample_edges,
+        write_training_csv,
+    )
+
+    name = teacher.lower()
+    if name == "anthropic":
+        teacher_clf = ClaudeTreatmentClassifier(
+            model=teacher_model or "claude-haiku-4-5-20251001",
+        )
+    elif name == "ollama":
+        teacher_clf = OllamaTreatmentClassifier(
+            model=teacher_model or "qwen2.5:14b-instruct",
+        )
+    else:
+        raise typer.BadParameter(f"unknown --teacher {teacher!r}; pick anthropic / ollama")
+
+    edges = list(
+        sample_edges(
+            n=sample,
+            only_with_sentence=only_with_sentence,
+            jurisdiction=jurisdiction,
+            seed=seed,
+        )
+    )
+    typer.echo(f"sampled {len(edges)} edges")
+    if not edges:
+        typer.echo("no edges to distill; nothing written")
+        raise typer.Exit(code=1)
+
+    samples = label_with_teacher(edges, teacher=teacher_clf, batch_size=batch_size)
+    n_written = write_training_csv(samples, out)
+    typer.echo(
+        json.dumps(
+            {
+                "sampled": len(edges),
+                "labelled": len(samples),
+                "written": n_written,
+                "out": out,
+                "teacher": teacher_clf.name,
+                "distribution": label_distribution(samples),
+            },
+            indent=2,
+        )
+    )
+
+
+@app.command("train-distilled")
+def train_distilled_cmd(
+    csv_in: Annotated[
+        str,
+        typer.Option(
+            "--in",
+            "-i",
+            help="Path to the training CSV produced by `clg link distill`.",
+        ),
+    ],
+    base_model: Annotated[
+        str,
+        typer.Option(
+            "--base-model",
+            help="HF encoder. law-ai/InLegalBERT is the default; "
+            "microsoft/deberta-v3-base is a strong general option.",
+        ),
+    ] = "law-ai/InLegalBERT",
+    out: Annotated[
+        str,
+        typer.Option("--out", "-o", help="Where to save the fine-tuned model."),
+    ] = "artifacts/treatment_head",
+    epochs: Annotated[int, typer.Option("--epochs")] = 4,
+    learning_rate: Annotated[float, typer.Option("--learning-rate")] = 2e-5,
+    batch_size: Annotated[int, typer.Option("--batch-size")] = 16,
+    max_len: Annotated[int, typer.Option("--max-len")] = 256,
+    test_size: Annotated[float, typer.Option("--test-size")] = 0.15,
+    seed: Annotated[int, typer.Option("--seed")] = 42,
+    freeze_encoder: Annotated[
+        bool,
+        typer.Option(
+            "--freeze-encoder/--full-finetune",
+            help="Head-only trains faster but caps quality. Switch to full "
+            "fine-tune when you have 5k+ teacher labels.",
+        ),
+    ] = False,
+) -> None:
+    """Fine-tune a HuggingFace encoder on the distilled labels.
+
+    Wraps the existing ``crimellm.classifier.train`` pipeline at
+    ``num_labels=10`` with the treatment vocabulary. Reports macro-F1 + per-label
+    F1 on the held-out split, plus the path you can hand to the cascade as
+    ``--distilled-dir``.
+    """
+    from ..link import classification_report_text, train_distilled_head
+
+    result = train_distilled_head(
+        csv_in,
+        base_model=base_model,
+        output_dir=out,
+        epochs=epochs,
+        learning_rate=learning_rate,
+        batch_size=batch_size,
+        max_len=max_len,
+        test_size=test_size,
+        seed=seed,
+        freeze_encoder=freeze_encoder,
+    )
+    typer.echo(
+        json.dumps(
+            {
+                "output_dir": str(result.output_dir),
+                "n_train": result.n_train,
+                "n_test": result.n_test,
+                "base_model": result.base_model,
+                "eval_metrics": result.eval_metrics,
+                "per_label_f1": result.per_label_f1,
+            },
+            indent=2,
+            default=str,
+        )
+    )
+    typer.echo("\n" + classification_report_text(result.per_label_f1))
+    typer.echo(
+        f"\nNext step: `clg link treatment --backend rules+distilled+ollama --distilled-dir {out}`"
+    )
+
+
 def _build_cascade(
     backends: list[str],
     *,
