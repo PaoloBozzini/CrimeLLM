@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from sklearn.metrics import f1_score
 
 from .treatment_base import ID_TO_LABEL, TREATMENT_VOCAB
 
@@ -34,6 +33,8 @@ class DistillTrainResult:
 
 def _holdout_metrics(trainer: Any) -> tuple[dict[str, float], dict[str, float]]:
     """Compute macro-F1 + per-label F1 on the trainer's eval split."""
+    from sklearn.metrics import f1_score
+
     preds = trainer.predict(trainer.eval_dataset)
     y_true = preds.label_ids
     y_pred = np.argmax(preds.predictions, axis=-1)
