@@ -12,10 +12,10 @@ Single front door to every stage of the pipeline. Each phase (graph admin, inges
 |---|---|
 | `__init__.py` | Top-level app + registers groups; defines `clg embed`, `clg embed-rebuild`, `clg query`, `clg eval` |
 | `graph.py` | `clg graph init / status / wipe / drop-schema / rebuild-vector-index / cites / cited-by / counts / search / provision-as-of` |
-| `ingest.py` | `clg ingest courtlistener / courtlistener-status / courtlistener-index / legislation-uk / eurlex / retsinformation / find-case-law` |
-| `parse.py` | `clg parse retsinformation / eurlex` (sanity check; `clg load` runs parse internally) |
-| `load.py` | `clg load courtlistener / legislation-uk / eurlex / retsinformation` |
-| `link.py` | `clg link citations / distill / train-distilled / treatment` |
+| `ingest.py` | `clg ingest courtlistener / courtlistener-status / courtlistener-index / legislation-uk / eurlex / retsinformation / domstol / karnov / find-case-law` |
+| `parse.py` | `clg parse retsinformation / eurlex / domstol` (sanity check; `clg load` runs parse internally) |
+| `load.py` | `clg load courtlistener / legislation-uk / eurlex / retsinformation / domstol` |
+| `link.py` | `clg link citations / distill / train-distilled / treatment` — `treatment` auto-builds one rule classifier per enabled jurisdiction so DK + EU + common-law rule sets coexist without double-labelling |
 | `_common.py` | Shared helpers — CSV jurisdiction parser, store factory, output formatting |
 
 ## When to use

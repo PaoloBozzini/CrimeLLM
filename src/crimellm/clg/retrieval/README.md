@@ -12,7 +12,7 @@ parse_query → seed (vector) → expand (graph) → good_law → rerank → syn
 
 | File | Stage | Purpose |
 |---|---|---|
-| `parse_query.py` | parse | `Query(question, jurisdiction_hint, as_of_date)` from CLI / API input |
+| `parse_query.py` | parse | `Query(question, jurisdiction_hint, as_of_date)` from CLI / API input. 4-way jurisdiction inference (US / UK / EU / DK) via per-jurisdiction cue tables; ties or zero-hit → `None` |
 | `seed.py` | seed | `seed_from_chunks(query)` — vector search against the `Chunk` index, returns `Candidate` seeds |
 | `expand.py` | expand | `expand_seeds(seeds)` — traverse `CITES` (forward + backward), `INTERPRETS` (Provision↔Case), pick the temporally correct Provision version |
 | `good_law.py` | filter | `check_good_law(case)` → `GoodLawFlag` (`GOOD` / `OVERRULED` / `REVERSED` / `UNKNOWN`); reads treatment edges produced by [`clg.link`](../link/README.md) |

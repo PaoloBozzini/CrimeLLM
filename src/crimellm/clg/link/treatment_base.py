@@ -71,6 +71,7 @@ class EdgeContext:
     cited_case_name: str = ""
     citing_decision_date: str | None = None
     cited_decision_date: str | None = None
+    citing_case_jurisdiction: str | None = None
     depth: float = 1.0
 
 

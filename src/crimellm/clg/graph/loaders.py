@@ -178,6 +178,7 @@ def iter_neutral_cites(
         "RETURN id(r) AS edge_id, "
         "       citing.id AS citing_case_id, citing.name AS citing_case_name, "
         "       citing.decision_date AS citing_decision_date, "
+        "       citing.jurisdiction AS citing_case_jurisdiction, "
         "       cited.id AS cited_case_id, cited.name AS cited_case_name, "
         "       cited.decision_date AS cited_decision_date, "
         "       coalesce(r.citing_sentence, '') AS citing_sentence, "

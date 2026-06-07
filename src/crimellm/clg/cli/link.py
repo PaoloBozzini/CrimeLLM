@@ -271,7 +271,14 @@ def _build_cascade(
     the offending tier to be skipped with a stderr note rather than a hard
     error — Phase 5.3 is meant to run partially when only some tiers are
     available.
+
+    Phase 6: when ``rules`` is requested, one ``RuleTreatmentClassifier``
+    is built **per enabled jurisdiction** so DK + EU rule sets coexist
+    without one stomping on the other. Each classifier abstains on edges
+    from other jurisdictions; the cascade chains them so any matching
+    jurisdiction's rules get a shot before escalation.
     """
+    from ..config import get_settings
     from ..link import (
         CascadeClassifier,
         ClaudeTreatmentClassifier,
@@ -284,7 +291,10 @@ def _build_cascade(
     for name in backends:
         name = name.strip().lower()
         if name == "rules":
-            tiers.append((RuleTreatmentClassifier(), confidence_threshold))
+            for j in get_settings().enabled_jurisdictions:
+                tiers.append(
+                    (RuleTreatmentClassifier(jurisdiction=j), confidence_threshold)
+                )
         elif name == "distilled":
             if not distilled_dir:
                 typer.secho(
@@ -434,6 +444,7 @@ def treatment(
                 cited_decision_date=str(r.get("cited_decision_date"))
                 if r.get("cited_decision_date")
                 else None,
+                citing_case_jurisdiction=r.get("citing_case_jurisdiction"),
                 depth=float(r.get("depth") or 1.0),
             )
             for r in batch_rows

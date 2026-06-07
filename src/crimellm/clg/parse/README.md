@@ -9,7 +9,8 @@ Convert raw source files (downloaded by [`clg.ingest`](../ingest/README.md)) int
 | `courtlistener.py` | bz2 CSV streams (courts, clusters, opinions, citations.csv) | `Court`, `Case`, `Citation` tuples | Streams; builds opinion→cluster sidecar index on first run (slow, one-time per dump) |
 | `legislation_uk.py` | CLML XML whole-act files | one `Instrument` per Act + one `Provision` per section per version | Sets `valid_from` / `valid_to` for point-in-time queries |
 | `eurlex.py` | Akoma Ntoso / FORMEX XML | `Instrument` + `Provision` (regulations/directives) or `Case` (CJEU judgments) | Multi-language; CELEX-keyed |
-| `retsinformation.py` | Danish primary-law XML | `Instrument` + `Provision` | Optionally explodes substykker into separate Provisions or folds into parent § text |
+| `retsinformation.py` | Danish primary-law XML | `Instrument` + `Provision` | Optionally explodes substykker into separate Provisions or folds into parent § text. Preamble EU references → CELEX → IMPLEMENTS seeds |
+| `domstol.py` | DK judgment PDF or extracted text | `Case` + `citation_hits` | Two-layer: `parse_judgment_text` (pure-text) + `parse_judgment_pdf` (pypdf wrapper). Auto-recovers ECLI / court id / decision date from body via DA-aware regexes. Feeds Phase 1 DK + EU citation parsers |
 | `find_case_law.py` | TNA Akoma Ntoso XML | `Case` | Minimal; expanded in later phase |
 
 ## When to use
@@ -25,6 +26,7 @@ clg parse retsinformation --file data/raw/retsinformation/lbk-2018-502.xml \
     --doc-type lbk --year 2018 --num 502
 clg parse eurlex          --file data/raw/eurlex/32016R0679_en.xml \
     --kind regulation --celex 32016R0679 --lang en
+clg parse domstol         --file data/raw/domstol/ECLI_DK_HR_2023_1234.pdf
 ```
 
 ```python

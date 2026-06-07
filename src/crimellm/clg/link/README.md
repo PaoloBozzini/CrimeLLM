@@ -19,16 +19,18 @@ Two related jobs:
 
 ### Treatment classification (cascade)
 
-Treatment vocab (10 labels): common-law `followed, applied, considered, distinguished, doubted, not_followed, overruled, reversed, affirmed, neutral` + civil-law `departed_from, criticised`.
+Treatment vocab (12 labels): common-law `followed, applied, considered, distinguished, doubted, not_followed, overruled, reversed, affirmed, neutral` + civil-law `departed_from, criticised`.
 
 | File | Tier | Cost | Coverage | When |
 |---|---|---|---|---|
-| `treatment_base.py` | — | — | — | `TreatmentClassifier` ABC + `EdgeContext` dataclass |
-| `treatment_rules.py` | 1 | free | ~35% | Regex / signal-phrase rules. Always tried first |
-| `treatment_distilled.py` | 2 | cheap | high after training | InLegalBERT head fine-tuned on teacher labels. Needs `clg link distill` + `clg link train-distilled` first |
+| `treatment_base.py` | — | — | — | `TreatmentClassifier` ABC + `EdgeContext` dataclass (with `citing_case_jurisdiction`) |
+| `treatment_rules.py` | 1 | free | ~35% | Regex / signal-phrase rules. `RULES_BY_JURISDICTION` registry; `RuleTreatmentClassifier(jurisdiction="DK")` pulls matching set + abstains on out-of-jurisdiction edges. Common-law rules shared across US / EW / UK |
+| `treatment_rules_dk.py` | 1 (DK) | free | DK-only | 15 Danish cues: `i overensstemmelse med` → followed, `har fraveget` → departed_from, `kritiseret af` → criticised, `tilsidesat` → not_followed, etc. **No overruled/reversed** (civil-law style) |
+| `treatment_rules_eu.py` | 1 (EU) | free | CJEU | CJEU-specific cues (`departing from`, `settled case-law`, `restated in`) prepended to common-law base |
+| `treatment_distilled.py` | 2 | cheap | high after training | InLegalBERT head fine-tuned on teacher labels. Needs `clg link distill` + `clg link train-distilled` first. **DA training set deferred** |
 | `treatment_local_llm.py` | 3 | free | high | Ollama (any model) for cases the distilled head is unsure about |
 | `treatment_anthropic.py` | 4 / teacher | paid | high | Claude Haiku with prompt caching. Used as teacher in distillation **and** as final tier |
-| `treatment_cascade.py` | — | — | — | `CascadeClassifier` orchestrates the tiers with per-tier confidence thresholds; budgets Claude calls |
+| `treatment_cascade.py` | — | — | — | `CascadeClassifier` orchestrates the tiers with per-tier confidence thresholds; budgets Claude calls. CLI builds one rule classifier per enabled jurisdiction so DK + EU + common-law coexist |
 
 ## When to use what
 

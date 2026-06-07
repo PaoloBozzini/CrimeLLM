@@ -12,9 +12,9 @@ The sibling [`crimellm.classifier`](../classifier/README.md) is the original FAI
 | `config.py` | Pydantic settings (`Settings`) — loads `.env`, jurisdiction toggle, model defaults |
 | `models.py` | Document model: `Jurisdiction`, `Case`, `Instrument`, `Provision`, `Chunk`, `Citation`, `Court`, `Treatment`, `Provenance`. All have `.to_neo4j_props()` |
 | `graph/` | Neo4j backend — `driver.py` (`Neo4jStore`, `get_store()`), `schema.py` (constraints, indexes, vector index, jurisdiction seeds), `loaders.py` (batched `UNWIND MERGE`) |
-| `ingest/` | Source downloaders — `_base.Source` ABC; one file per source: `courtlistener`, `legislation_uk`, `eurlex`, `retsinformation`, `find_case_law` |
-| `parse/` | Source-format → `crimellm.clg.models` — `courtlistener` (bz2 CSV stream), `legislation_uk` (CLML XML), `eurlex` (Akoma Ntoso / FORMEX), `retsinformation`, `find_case_law` |
-| `link/` | Citation extraction (`cite_registry`, `cite_us`, `cite_eu`, `cite_dk`, eyecite-backed) and treatment classification cascade (`treatment_rules` → `treatment_distilled` → `treatment_local_llm` → `treatment_anthropic`) |
+| `ingest/` | Source downloaders — `_base.Source` ABC; one file per source: `courtlistener`, `legislation_uk`, `eurlex`, `retsinformation`, `domstol` (DK case law PDFs), `karnov` (skeleton, subscription-gated), `find_case_law` |
+| `parse/` | Source-format → `crimellm.clg.models` — `courtlistener` (bz2 CSV stream), `legislation_uk` (CLML XML), `eurlex` (Akoma Ntoso / FORMEX), `retsinformation` (custom DA XML), `domstol` (PDF + DA judgment text), `find_case_law` |
+| `link/` | Citation extraction (`cite_registry`, `cite_us`, `cite_eu`, `cite_dk`, eyecite-backed) and **per-jurisdiction** treatment classification cascade (`treatment_rules` + `treatment_rules_dk` + `treatment_rules_eu` → `treatment_distilled` → `treatment_local_llm` → `treatment_anthropic`) |
 | `embed/` | `chunker.py` (provision/case → `Chunk`), `embedder.py` (Voyage / OpenAI / SentenceTransformer / Fake backends) |
 | `retrieval/` | Graph-RAG runner — `parse_query`, `seed` (vector hits), `expand` (CITES / INTERPRETS / temporal), `good_law` (overruled / reversed gating), `rerank`, `synthesize` (Anthropic / Ollama / AirLLM / Fake), `query.run_query` |
 | `eval/` | Gold-set runner — `schema` (`GoldQuestion`, `GoldSet`), `runner`, `metrics` (recall@k, citation accuracy, good-law P/R, as-of correctness), `report` (md/json) |
@@ -26,7 +26,7 @@ The sibling [`crimellm.classifier`](../classifier/README.md) is the original FAI
 | `US` | CourtListener bulk dumps | Federal + state courts, citations CSV |
 | `EW` / `UK` | legislation.gov.uk (CLML), Find Case Law (TNA) | UK Acts; point-in-time versions (`enacted`, `current`, ISO dates) |
 | `EU` | EUR-Lex CELLAR (Akoma Ntoso / FORMEX) | CELEX-keyed, 24 languages |
-| `DK` | retsinformation.dk | `lov`, `lbk`, `bek`; ELI-keyed |
+| `DK` | retsinformation.dk (legislation) + domstol.dk (case law, PDF) + Karnov (commercial, gated) | `lov`, `lbk`, `bek`; ELI-keyed; Højesteret / Landsret / Byret hierarchy |
 
 Toggle via `ENABLED_JURISDICTIONS=US,EW,UK,EU,DK` in `.env`.
 
@@ -69,6 +69,8 @@ clg ingest courtlistener   --date 2024-12-31 --files courts,dockets,clusters,opi
 clg ingest legislation-uk  --versions enacted,current --statutes ukpga/2006/35,ukpga/1968/60
 clg ingest eurlex          --celex 32016R0679,32019L0770 --lang en,da
 clg ingest retsinformation --items lbk/2018/502,lov/2023/1100
+clg ingest domstol         --items 'ECLI:DK:HR:2023:1|https://domstol.dk/.../1.pdf,ECLI:DK:OLR:2023:42|https://.../42.pdf'
+clg ingest karnov          # requires KARNOV_API_KEY + firm subscription (skeleton)
 clg ingest find-case-law   # requires TNA_COMPUTATIONAL_LICENCE_ACCEPTED=1
 
 # 2. parse (sanity check; load runs parse internally)
@@ -80,6 +82,7 @@ clg load courtlistener    --date 2024-12-31 --limit 1000
 clg load legislation-uk   --versions enacted,current
 clg load eurlex           --celex 32016R0679,32019L0770 --lang en,da
 clg load retsinformation  --items lbk/2018/502 --explode-subparagraphs
+clg load domstol          --items 'ECLI:DK:HR:2023:1|<url>'
 
 # 4. citations + treatment edges
 clg link citations  --file case_body.txt --jurisdiction UK
@@ -118,4 +121,6 @@ clg eval --gold-set data/eval/seed.yaml --backend voyage --synth anthropic --for
 - **legislation.gov.uk** — Open Government Licence v3.0; no key.
 - **EUR-Lex** — Commission re-use notice; no key.
 - **retsinformation.dk** — Civilstyrelsen open licence; no key.
+- **domstol.dk** — open access, attribution required. Free corpus only — PDF heavy.
+- **Karnov Online / Ufr** — commercial reporters. `clg ingest karnov` is a skeleton; refuses to run until `KARNOV_API_KEY` is set, and the firm must hold a subscription.
 - **Find Case Law (TNA)** — programmatic bulk extraction requires the free **computational-analysis licence**. `clg ingest find-case-law` refuses to run until `TNA_COMPUTATIONAL_LICENCE_ACCEPTED=1`. Rate limit ~1000 req / 5 min.
