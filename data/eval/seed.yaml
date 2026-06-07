@@ -1,0 +1,89 @@
+name: clg-seed
+description: |
+  Phase 6 seed gold set — 6 hand-authored questions covering the four task
+  types the brief calls out (single-fact, multi-hop, as-of-date, good-law)
+  + a no-fabrication probe. Designed to run end-to-end on the committed
+  fixtures from Phases 2-5; the live-graph subset works the moment those
+  fixtures are loaded into Neo4j.
+version: "1"
+
+questions:
+  # --- US — good law (Plessy → Brown) ---
+  - id: us-good-law-plessy
+    question: "Is Plessy v. Ferguson still good law?"
+    task_type: good_law
+    jurisdiction: US
+    as_of: 2024-06-01
+    expected_authorities:
+      - cl-cluster-plessy
+    expected_good_law:
+      cl-cluster-plessy: overruled
+    expected_treating_case: cl-cluster-brown
+    tags: [landmark, overruled]
+    notes: |
+      Requires Phase 5 to have populated treatment=overruled on the
+      Brown→Plessy CITES edge.
+
+  # --- UK — single-fact lookup, current Provision ---
+  - id: uk-single-fact-fraud-penalty-current
+    question: "Maximum sentence on indictment for fraud under the Fraud Act 2006 (current law)."
+    task_type: single_fact
+    jurisdiction: UK
+    as_of: 2024-06-01
+    expected_authorities:
+      - uk/ukpga/2006/35/section/3@current
+    tags: [statute, single-fact]
+
+  # --- UK — as-of-date filtering ---
+  - id: uk-as-of-fraud-penalty-2010
+    question: "Maximum sentence on indictment for fraud under the Fraud Act 2006 (as of 2010-06-01)."
+    task_type: as_of_date
+    jurisdiction: UK
+    as_of: 2010-06-01
+    expected_authorities:
+      - uk/ukpga/2006/35/section/3@enacted
+    tags: [statute, as-of-date]
+    notes: |
+      Same question, different date → must return the enacted (7-year)
+      version, NOT the current (10-year) version.
+
+  # --- UK — multi-hop: judgment → interpreted provisions ---
+  - id: uk-multi-hop-r-v-smith-2015
+    question: "Which sections of the Fraud Act 2006 did R v Smith [2015] EWCA Crim 12345 interpret?"
+    task_type: multi_hop
+    jurisdiction: UK
+    as_of: 2024-06-01
+    expected_authorities:
+      - uk/ukpga/2006/35/section/2@enacted
+      - uk/ukpga/2006/35/section/3@enacted
+    tags: [multi-hop, judgment-to-statute]
+
+  # --- UK — fabrication probe ---
+  - id: uk-no-fabrication-irrelevant
+    question: "What did the Fraud Act 2006 say about quantum computing intellectual property?"
+    task_type: no_fabrication
+    jurisdiction: UK
+    as_of: 2024-06-01
+    expected_authorities: []
+    tags: [adversarial, no-fabrication]
+    notes: |
+      Out-of-scope question — the right answer is "the context does not
+      address this". Citation accuracy = 100% only if no fabricated
+      authority appears in the response.
+
+  # --- Cross-jurisdiction inference (no explicit cue) ---
+  - id: us-good-law-named-overruler
+    question: "Was Plessy v. Ferguson overruled, and if so by which case?"
+    task_type: good_law
+    jurisdiction: US
+    as_of: 2024-06-01
+    expected_authorities:
+      - cl-cluster-plessy
+      - cl-cluster-brown
+    expected_good_law:
+      cl-cluster-plessy: overruled
+    expected_treating_case: cl-cluster-brown
+    tags: [landmark, overruled, named-treater]
+    notes: |
+      Stronger version of us-good-law-plessy — requires the answer text to
+      mention Brown v. Board by stable identifier, not just the caveat.

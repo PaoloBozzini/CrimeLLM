@@ -1,29 +1,61 @@
 # CrimeLLM
 
-Three-class crime classifier (`no` / `yes` / `unclear`) for short text snippets. Bundles three independent paths in one `uv` package:
+Two complementary pipelines under one `uv` package.
+
+### Pipeline 1 — **classifier** (original)
+
+Three-class crime classifier (`no` / `yes` / `unclear`) for short text snippets. Three independent paths:
 
 1. **Fine-tune** — `law-ai/InLegalBERT` (or any HF encoder) + a 3-class head.
 2. **Zero-shot LLM** — uniform `classify(text)` API over three backends:
    - `OllamaClassifier` (local, JSON-schema constrained decoding)
    - `AnthropicClassifier` (Claude API, forced tool-use for schema enforcement, prompt caching)
    - `AirLLMClassifier` (layer-by-layer disk offload; MLX on Mac, CUDA + bitsandbytes on NVIDIA)
-3. **RAG** — `LegalRetriever` (FAISS + BGE-small) over a corpus you build from:
+3. **FAISS RAG** — `LegalRetriever` (FAISS + BGE-small) over a JSONL corpus built from:
    - **US Code** (Title 18 — criminal code) via govinfo.gov
    - **UK Acts of Parliament** (Fraud Act, Theft Act, Bribery Act, …) via legislation.gov.uk
    - **CourtListener** judgments (federal/state case law) via REST v4
 
-Plus a frozen-embedding linear probe (`embed_probe.py`) for quick base-model bake-offs.
+Lives at the package root (`train.py`, `inference.py`, `rag.py`, `zero_shot.py`, `embed_probe.py`, `corpora.py`). Plus a frozen-embedding linear probe for quick base-model bake-offs.
+
+### Pipeline 2 — **clg (Common Legal Graph)**
+
+Neo4j graph RAG over US + UK primary law. Lives under `src/crimellm/clg/`. Encodes the **citation and treatment** network plus **point-in-time legislation**, so it can answer multi-hop, "is this still good law?", and "as of date X" questions that flat vector RAG cannot. See [`docs/phases.local.md`](docs/phases.local.md) for the phase tracker (local-only, untracked) and the section further down for `clg` usage.
+
+### Why two ingest layers?
+
+Both pipelines pull from CourtListener / legislation.gov.uk / govinfo, but they ingest at different granularities:
+
+- `crimellm.corpora` (REST → JSONL) for the FAISS pipeline — convenient single-file snippet corpora for the classifier.
+- `crimellm.clg.ingest.*` (bulk CSV / XML → Neo4j) for the graph pipeline — full edges, full provenance, full point-in-time history.
+
+They share `crimellm.common.http` (retry + UA + resumable download) so neither pays for the other.
 
 ## Setup
 
-Install [uv](https://docs.astral.sh/uv/), then from the project root:
+Install [uv](https://docs.astral.sh/uv/), then pick the extras you need:
 
 ```bash
-uv sync                       # core: transformers, faiss, sentence-transformers, ...
+# Lean default — just enough for shared utilities.
+uv sync
+
+# Pipeline 1 (classifier + FAISS RAG + zero-shot baselines).
+uv sync --extra classifier
 uv sync --extra airllm        # optional: AirLLM zero-shot backend
 uv sync --extra airllm-mlx    # optional: Mac MLX backend for AirLLM
 uv sync --extra airllm-cuda   # optional: NVIDIA + 4/8-bit (bitsandbytes)
-uv sync --extra anthropic     # optional: Claude API backend
+
+# Pipeline 2 (clg — Neo4j graph RAG).
+uv sync --extra clg
+
+# Cross-cutting.
+uv sync --extra anthropic     # Claude API (used by both pipelines)
+
+# Everything (= classifier + clg + anthropic).
+uv sync --extra all
+
+# Contributor tooling.
+uv sync --extra dev           # pytest + ruff
 ```
 
 Cross-platform PyTorch: macOS gets MPS-ready PyPI wheel; Windows auto-routes to the CUDA 12.1 index via `[tool.uv.sources]`. Edit `pyproject.toml` if you need another CUDA version.
@@ -107,11 +139,15 @@ uv run python -m ipykernel install --user --name crimellm --display-name "CrimeL
 uv run jupyter lab notebooks/
 ```
 
-- `finetune.ipynb` — train + evaluate the InLegalBERT classifier
-- `base_model_bakeoff.ipynb` — macro-F1 across candidate base models
-- `embedding_probe.ipynb` — frozen-embedding + logistic regression probe
-- `zero_shot_llm.ipynb` — Ollama / Anthropic / AirLLM comparison
-- `rag_demo.ipynb` — full pipeline: ingest USC + UK + CL → FAISS → classify with vs. without RAG
+Layout:
+
+- `notebooks/classifier/` — original classifier + FAISS RAG demos:
+  - `finetune.ipynb` — train + evaluate the InLegalBERT classifier
+  - `base_model_bakeoff.ipynb` — macro-F1 across candidate base models
+  - `embedding_probe.ipynb` — frozen-embedding + logistic regression probe
+  - `zero_shot_llm.ipynb` — Ollama / Anthropic / AirLLM comparison
+  - `rag_demo.ipynb` — full pipeline: ingest USC + UK + CL → FAISS → classify with vs. without RAG
+- `notebooks/clg/` — graph RAG notebooks (Phase 3+ will populate this).
 
 ## Package layout
 
@@ -152,6 +188,41 @@ Corpus JSONL — one record per line:
 ## Device handling
 
 `crimellm.device.resolve_device()` picks **CUDA → MPS → CPU**. `training_kwargs_for_device()` injects per-backend `TrainingArguments` (bf16/fp16 on NVIDIA, fp32 on MPS, disables `pin_memory` off-CUDA). `AirLLMClassifier` routes to MLX on Darwin and to CUDA elsewhere.
+
+## `clg` — Common Legal Graph (Neo4j RAG, in progress)
+
+Graph-backed retrieval over US + UK primary law. The graph encodes the citation-and-treatment network plus point-in-time legislation, so the pipeline can answer multi-hop, "is this still good law?", and "as of date X" questions that flat vector RAG cannot. Lives in `src/crimellm/clg/` alongside the existing FAISS retriever.
+
+### Setup
+
+```bash
+docker compose up -d neo4j        # Neo4j 5.x (community) on bolt://localhost:7687
+make install                      # uv sync --extra clg --extra dev
+cp .env.example .env              # fill in NEO4J_PASSWORD, VOYAGE_API_KEY, ANTHROPIC_API_KEY
+uv run clg graph init             # constraints + vector index + jurisdiction seeds
+uv run clg graph status
+uv run pytest -q
+```
+
+Browse Neo4j at http://localhost:7474 (user `neo4j`, password from `.env`).
+
+### CLI surface (Phase 0 — most subcommands are stubs)
+
+```
+clg graph init | status | wipe --yes | drop-schema --yes
+clg ingest courtlistener | uscode | legislation-uk | find-case-law
+clg parse  uslm | akoma-ntoso
+clg link   citations | treatment
+clg embed
+clg query "..." --jurisdiction EW --as-of 2021-06-01
+clg eval
+```
+
+### Source-data licences (read before bulk-fetching)
+
+- **CourtListener / CAP / US Code / eCFR** — permissive; be polite on rate limits.
+- **legislation.gov.uk** — Open Government Licence v3.0; no key required.
+- **Find Case Law (TNA)** — reading is open under the Open Justice Licence, but **programmatic bulk extraction or enrichment requires applying for the (free) computational-analysis licence**. The `clg ingest find-case-law` downloader refuses to run until `TNA_COMPUTATIONAL_LICENCE_ACCEPTED=1` is set in `.env`. Rate limit: ~1,000 requests / 5 min.
 
 ## License
 

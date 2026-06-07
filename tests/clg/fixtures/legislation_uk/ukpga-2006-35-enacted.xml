@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Legislation xmlns="http://www.legislation.gov.uk/namespaces/legislation"
+             xmlns:dc="http://purl.org/dc/elements/1.1/"
+             xmlns:ukm="http://www.legislation.gov.uk/namespaces/metadata">
+  <ukm:Metadata>
+    <dc:title>Fraud Act 2006 (as enacted, fixture)</dc:title>
+    <ukm:EnactmentDate Date="2006-11-08"/>
+  </ukm:Metadata>
+  <Primary>
+    <Body>
+      <P1group>
+        <Title>Fraud</Title>
+        <P1>
+          <Pnumber>1</Pnumber>
+          <P1para>A person is guilty of fraud if he is in breach of any of the sections listed in subsection (2).</P1para>
+        </P1>
+      </P1group>
+      <P1group>
+        <Title>Fraud by false representation</Title>
+        <P1>
+          <Pnumber>2</Pnumber>
+          <P1para>A person is in breach of this section if he dishonestly makes a false representation and intends to make a gain or cause a loss.</P1para>
+        </P1>
+      </P1group>
+      <P1group>
+        <Title>Penalty</Title>
+        <P1>
+          <Pnumber>3</Pnumber>
+          <P1para>A person guilty of fraud is liable on indictment to imprisonment for a term not exceeding 7 years.</P1para>
+        </P1>
+      </P1group>
+    </Body>
+  </Primary>
+</Legislation>

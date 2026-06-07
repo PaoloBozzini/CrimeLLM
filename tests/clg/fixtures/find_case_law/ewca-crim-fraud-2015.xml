@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<akomaNtoso xmlns="http://docs.oasis-open.org/legaldocml/ns/akn/3.0">
+  <judgment name="judgment">
+    <meta>
+      <identification source="#tna">
+        <FRBRWork>
+          <FRBRthis value="/akn/uk/judgment/ewca/crim/2015/12345/main"/>
+          <FRBRuri value="/akn/uk/judgment/ewca/crim/2015/12345"/>
+          <FRBRdate date="2015-06-12" name="judgment"/>
+          <FRBRname value="R v Smith"/>
+          <FRBRcountry value="GB-EW"/>
+        </FRBRWork>
+        <FRBRExpression>
+          <FRBRthis value="/akn/uk/judgment/ewca/crim/2015/12345/main/eng"/>
+          <FRBRuri value="/akn/uk/judgment/ewca/crim/2015/12345/eng"/>
+          <FRBRdate date="2015-06-12" name="judgment"/>
+          <FRBRlanguage language="eng"/>
+        </FRBRExpression>
+      </identification>
+      <proprietary source="#tna">
+        <court>EWCA Crim</court>
+      </proprietary>
+    </meta>
+    <header>
+      <neutralCitation>[2015] EWCA Crim 12345</neutralCitation>
+      <docTitle>R v Smith</docTitle>
+    </header>
+    <body>
+      <paragraph eId="para_1">
+        <num>1.</num>
+        <content>
+          <p>The appellant was charged under section <ref href="/akn/uk/act/ukpga/2006/35/section/2">s 2</ref> of the Fraud Act 2006.</p>
+        </content>
+      </paragraph>
+      <paragraph eId="para_2">
+        <num>2.</num>
+        <content>
+          <p>The sentencing court relied on <ref href="/akn/uk/act/ukpga/2006/35/section/3">section 3</ref> as to penalty.</p>
+        </content>
+      </paragraph>
+      <paragraph eId="para_3">
+        <num>3.</num>
+        <content>
+          <p>A cross-reference to <ref href="/akn/uk/act/ukpga/1968/60/section/1">Theft Act 1968 s 1</ref> was considered but rejected.</p>
+        </content>
+      </paragraph>
+    </body>
+  </judgment>
+</akomaNtoso>
