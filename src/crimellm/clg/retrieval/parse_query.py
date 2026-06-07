@@ -1,14 +1,21 @@
 """Parse the user's free-text question into a structured ``Query``.
 
-Two knobs come out:
+Three knobs come out:
 
 * ``jurisdiction`` — defaults to ``None`` (cross-jurisdiction). Heuristics
   bump it to ``US`` / ``UK`` / ``EW`` / ``EU`` / ``DK`` when the question
   makes it obvious ("U.S. Code §...", "Fraud Act 2006 s.2", "straffelovens
   § 279", "Article 101 TFEU"). CLI ``--jurisdiction`` always wins over
-  inference.
+  inference. Inferred jurisdictions not in ``enabled_jurisdictions`` are
+  cleared back to ``None`` so a disabled corpus doesn't accidentally drive
+  retrieval.
 * ``as_of`` — defaults to today (UTC). An explicit ISO date anywhere in the
   prompt ("as of 2018-05-12") overrides. CLI ``--as-of`` always wins.
+* ``language`` — ISO 639-1 of the question body. Drives synthesis prompt
+  language (Phase 8). Multi-signal detector: DA-only diacritics (æ/ø/å),
+  stopword frequency, character bigrams, and Danish word-ending suffixes
+  combine into a weighted score. Defaults to ``"en"`` when undetermined
+  — Claude handles EN > DA, so EN is the safer fallback.
 
 We *don't* extract entities here — that's the job of seed + expand. Parsing
 stays small so it can be reasoned about + tested cheaply.
@@ -20,9 +27,10 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from ...common.language import detect_language
 from ..models import Jurisdiction
 
-__all__ = ["Jurisdiction", "Query", "parse_query"]
+__all__ = ["Jurisdiction", "Query", "parse_query", "detect_language"]
 
 _ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
@@ -136,12 +144,15 @@ class Query:
     raw: str
     jurisdiction: Jurisdiction | None
     as_of: date
+    language: str = "en"
+    language_confidence: float = 0.0
 
     def with_overrides(
         self,
         *,
         jurisdiction: Jurisdiction | None = None,
         as_of: date | str | None = None,
+        language: str | None = None,
     ) -> Query:
         new_as_of = self.as_of
         if as_of is not None:
@@ -154,6 +165,8 @@ class Query:
             raw=self.raw,
             jurisdiction=jurisdiction if jurisdiction is not None else self.jurisdiction,
             as_of=new_as_of,
+            language=language if language is not None else self.language,
+            language_confidence=self.language_confidence,
         )
 
 
@@ -188,10 +201,34 @@ def _infer_as_of(text: str) -> date:
     return date.today()
 
 
-def parse_query(text: str) -> Query:
-    """Heuristic parse. Cheap, deterministic, easy to override at the CLI."""
+def parse_query(text: str, *, settings: object | None = None) -> Query:
+    """Heuristic parse. Cheap, deterministic, easy to override at the CLI.
+
+    ``settings`` defaults to ``crimellm.clg.config.get_settings()`` so the
+    enabled-jurisdiction filter applies automatically; tests / library
+    callers can inject a custom Settings instance.
+    """
+    inferred = _infer_jurisdiction(text)
+
+    # Enabled-jurisdiction filter: if the inferred jurisdiction isn't in
+    # the active set, clear it. Operator overrides via with_overrides
+    # always win, so CLI ``--jurisdiction DK`` still works even with DK
+    # disabled (caller-knows-best).
+    if inferred is not None:
+        if settings is None:
+            from ..config import get_settings
+
+            settings = get_settings()
+        is_enabled = getattr(settings, "is_enabled", None)
+        if callable(is_enabled) and not is_enabled(inferred):
+            inferred = None
+
+    lang, lang_conf = detect_language(text)
+
     return Query(
         raw=text.strip(),
-        jurisdiction=_infer_jurisdiction(text),
+        jurisdiction=inferred,
         as_of=_infer_as_of(text),
+        language=lang,
+        language_confidence=lang_conf,
     )
