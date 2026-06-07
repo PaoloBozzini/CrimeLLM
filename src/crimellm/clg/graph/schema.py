@@ -51,9 +51,16 @@ def rebuild_vector_index(
     """Drop + recreate ``chunk_embedding`` at a new dimension.
 
     Use when switching embedder backends with a different vector size — e.g.
-    moving from ``voyage-law-2`` (1024) to ``all-MiniLM-L6-v2`` (384). Old
-    Chunk embeddings stay on disk but the index can no longer use them; you
-    almost always want to ``drop_chunks=True`` and re-embed.
+    moving from ``BAAI/bge-m3`` (1024) to ``Qwen/Qwen3-Embedding-8B`` (4096),
+    or down to ``all-MiniLM-L6-v2`` (384) for dev. Old Chunk embeddings stay
+    on disk but the index can no longer use them; you almost always want
+    ``drop_chunks=True`` and to re-embed.
+
+    Same-dim swaps (``BAAI/bge-m3`` → ``Qwen/Qwen3-Embedding-0.6B``, both
+    1024) do NOT need this — the index is dim-keyed, not model-keyed; new
+    chunks just embed under the new model name. Use ``clg embed-rebuild``
+    to force re-embed of existing chunks per jurisdiction if you want
+    cross-corpus vector-space consistency.
     """
     store = store or get_store()
     deleted = 0

@@ -64,7 +64,9 @@ def rebuild_vector_index_cmd(
         int,
         typer.Option(
             "--dim",
-            help="New vector dimension (e.g. 384 for all-MiniLM-L6-v2, 1024 for voyage-law-2).",
+            help="New vector dimension (e.g. 4096 for Qwen/Qwen3-Embedding-8B, "
+            "1024 for BAAI/bge-m3 or Qwen/Qwen3-Embedding-0.6B, "
+            "384 for sentence-transformers/all-MiniLM-L6-v2).",
         ),
     ],
     drop_chunks: Annotated[

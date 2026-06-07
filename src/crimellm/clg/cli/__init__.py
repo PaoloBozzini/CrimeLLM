@@ -81,7 +81,11 @@ def embed_cmd(
     ] = "all",
     jurisdiction: Annotated[
         str | None,
-        typer.Option("--jurisdiction", "-j", help="Restrict to one jurisdiction code (US/EW/UK)."),
+        typer.Option(
+            "--jurisdiction",
+            "-j",
+            help="Restrict to one jurisdiction code (US|EW|UK|EU|DK).",
+        ),
     ] = None,
     limit: Annotated[
         int | None, typer.Option("--limit", help="Cap on entities processed (dev slice).")
@@ -153,6 +157,138 @@ def embed_cmd(
         chunks_buf, embedding_model=embedder.name, batch_size=batch_size, store=store
     )
     typer.echo(_json.dumps({"chunks": chunks_total, "model": embedder.name}, indent=2))
+
+
+@app.command("embed-rebuild")
+def embed_rebuild_cmd(
+    jurisdiction: Annotated[
+        str,
+        typer.Option(
+            "--jurisdiction",
+            "-j",
+            help="CSV of jurisdiction codes to rebuild, e.g. DK,EU. "
+            "Existing chunks for matching parents are DETACH DELETEd then re-embedded.",
+        ),
+    ],
+    backend: Annotated[
+        str | None,
+        typer.Option("--backend", help="voyage|openai|sentence-transformers|fake."),
+    ] = None,
+    model: Annotated[str | None, typer.Option("--model")] = None,
+    device: Annotated[str | None, typer.Option("--device")] = None,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes", "-y", help="Confirm destructive Chunk deletion before re-embed."
+        ),
+    ] = False,
+    batch_size: Annotated[int, typer.Option("--batch-size")] = 64,
+) -> None:
+    """Re-embed all Provision chunks for the listed jurisdictions.
+
+    Use after switching embedder model (e.g. ``BAAI/bge-m3`` →
+    ``Qwen/Qwen3-Embedding-8B``) when you want existing chunks re-embedded
+    under the new model for vector-space consistency. Jurisdictions not
+    listed are untouched. Same-dim swaps keep the index; different-dim
+    swaps need ``clg graph rebuild-vector-index --dim N --drop-chunks --yes``
+    first.
+    """
+    import json as _json
+
+    from ..config import get_settings
+    from ..embed.chunker import chunk_provision
+    from ..embed.embedder import embed_in_batches, get_embedder
+    from ..graph import get_store, load_chunks
+    from ..models import Provision
+    from ._common import parse_jurisdiction_csv
+
+    codes = parse_jurisdiction_csv(jurisdiction)
+    if not codes:
+        raise typer.BadParameter("--jurisdiction CSV produced no codes")
+    settings = get_settings()
+    unknown = [c for c in codes if not settings.is_enabled(c)]
+    if unknown:
+        raise typer.BadParameter(
+            f"jurisdiction(s) {unknown} not in enabled_jurisdictions={settings.enabled_jurisdictions}"
+        )
+    if not yes:
+        typer.echo(
+            f"Refusing to delete + re-embed Chunks for {codes} without --yes."
+        )
+        raise typer.Exit(code=2)
+
+    embedder = get_embedder(backend, model=model, device=device)
+    store = get_store()
+    store.verify()
+
+    deleted = store.run(
+        "MATCH (p:Provision)<-[:PART_OF]-(ch:Chunk) "
+        "WHERE p.jurisdiction IN $codes "
+        "WITH ch, count(ch) AS _ "
+        "DETACH DELETE ch RETURN count(*) AS n",
+        codes=codes,
+    )
+    n_deleted = (deleted[0]["n"] if deleted else 0) or 0
+
+    rows = store.run(
+        "MATCH (p:Provision) WHERE p.jurisdiction IN $codes "
+        "RETURN p.id AS id, p.instrument_id AS instrument_id, "
+        "       p.jurisdiction AS jurisdiction, p.section_path AS section_path, "
+        "       p.text AS text, p.version_id AS version_id, "
+        "       p.valid_from AS valid_from, p.valid_to AS valid_to",
+        codes=codes,
+    )
+
+    chunks_buf: list = []  # noqa: ANN401
+    texts_buf: list[str] = []
+    for r in rows:
+        prov = Provision(
+            id=r["id"],
+            instrument_id=r["instrument_id"],
+            jurisdiction=r["jurisdiction"],
+            section_path=r["section_path"],
+            text=r["text"] or "",
+            valid_from=r["valid_from"],
+            valid_to=r["valid_to"],
+            version_id=r["version_id"],
+        )
+        for ch in chunk_provision(prov):
+            chunks_buf.append(ch)
+            texts_buf.append(ch.text)
+
+    if not chunks_buf:
+        typer.echo(
+            _json.dumps(
+                {
+                    "jurisdictions": codes,
+                    "chunks_deleted": int(n_deleted),
+                    "chunks_written": 0,
+                    "model": embedder.name,
+                    "note": "no Provisions matched; deletion still applied",
+                },
+                indent=2,
+            )
+        )
+        return
+
+    vectors = embed_in_batches(embedder, texts_buf, batch_size=batch_size)
+    for ch, vec in zip(chunks_buf, vectors, strict=True):
+        ch.embedding = vec
+
+    n_written = load_chunks(
+        chunks_buf, embedding_model=embedder.name, batch_size=batch_size, store=store
+    )
+    typer.echo(
+        _json.dumps(
+            {
+                "jurisdictions": codes,
+                "chunks_deleted": int(n_deleted),
+                "chunks_written": n_written,
+                "model": embedder.name,
+            },
+            indent=2,
+        )
+    )
 
 
 @app.command("query")

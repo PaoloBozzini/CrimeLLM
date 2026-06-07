@@ -2,17 +2,24 @@
 
 Backends:
 
-* ``VoyageEmbedder`` — Voyage AI ``voyage-law-2`` (default; legal-domain
-  fine-tune). Requires ``VOYAGE_API_KEY``.
+* ``SentenceTransformerEmbedder`` — fully local via ``sentence-transformers``
+  (which transparently loads any HF encoder). The **production default** is
+  ``Qwen/Qwen3-Embedding-8B`` (4096-d, multilingual incl. Danish, MTEB
+  top-tier, no API key). Fallback: ``BAAI/bge-m3`` (1024-d, fast on CPU).
+  For dev / CI: ``Qwen/Qwen3-Embedding-0.6B`` (1024-d) or
+  ``sentence-transformers/all-MiniLM-L6-v2`` (384-d).
+* ``VoyageEmbedder`` — Voyage AI cloud (``voyage-multilingual-2``, 1024-d).
+  Kept as an optional path; requires ``VOYAGE_API_KEY``.
 * ``OpenAIEmbedder`` — ``text-embedding-3-large`` fallback. Requires
   ``OPENAI_API_KEY``.
 * ``FakeEmbedder`` — deterministic hash-based embedder. Zero-cost, no
   network, perfect for tests. Outputs ``dim``-dimensional L2-normalised
   unit vectors derived from ``sha256(text)``.
 
-All three implement the same ``Embedder`` ABC. The factory ``get_embedder``
+All implement the same ``Embedder`` ABC. The factory ``get_embedder``
 reads ``clg.config.Settings`` (model name, dim, API keys) and returns the
-right backend.
+right backend. Model names with an ``org/model`` shape route to
+sentence-transformers; explicit ``--backend voyage|openai|fake`` overrides.
 """
 
 from __future__ import annotations
@@ -53,9 +60,9 @@ class Embedder(ABC):
 
 
 class VoyageEmbedder(Embedder):
-    name = "voyage-law-2"
+    name = "voyage-multilingual-2"
 
-    def __init__(self, api_key: str, model: str = "voyage-law-2", dim: int = 1024):
+    def __init__(self, api_key: str, model: str = "voyage-multilingual-2", dim: int = 1024):
         try:
             import voyageai
         except ImportError as e:  # pragma: no cover — caller installs the extra
@@ -107,21 +114,26 @@ class OpenAIEmbedder(Embedder):
 class SentenceTransformerEmbedder(Embedder):
     """Local embedder via ``sentence-transformers``.
 
-    Default model is ``sentence-transformers/all-MiniLM-L6-v2`` (384-dim,
-    ~25 MB on first download). Runs on CPU by default; pass ``device='cuda'``
-    or ``'mps'`` to use the GPU. Reuses the ``[classifier]`` extra
-    (``sentence-transformers`` is already declared there); no clg-extra
-    addition needed.
+    Default model is ``Qwen/Qwen3-Embedding-8B`` (4096-d, multilingual,
+    ~16 GB). Runs on CPU by default; pass ``device='cuda'`` or ``'mps'``
+    for GPU. Reuses the ``[classifier]`` extra (``sentence-transformers``
+    is already declared there); no clg-extra addition needed.
+
+    Smaller picks:
+
+    * ``BAAI/bge-m3`` — 1024-d, ~2 GB, strong multilingual baseline.
+    * ``Qwen/Qwen3-Embedding-0.6B`` — 1024-d, ~1.2 GB, CPU-friendly dev.
+    * ``sentence-transformers/all-MiniLM-L6-v2`` — 384-d, ~25 MB, tests.
 
     First call downloads + caches the model under ``~/.cache/huggingface/``;
     subsequent calls are network-free.
     """
 
-    name = "sentence-transformers/all-MiniLM-L6-v2"
+    name = "Qwen/Qwen3-Embedding-8B"
 
     def __init__(
         self,
-        model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        model: str = "Qwen/Qwen3-Embedding-8B",
         device: str | None = None,
         dim: int | None = None,
         normalize: bool = True,
@@ -194,6 +206,41 @@ class FakeEmbedder(Embedder):
 # --- Factory ---------------------------------------------------------------
 
 
+# HF org prefixes that route to sentence-transformers without an explicit
+# ``--backend st`` flag. Extend when adopting new ecosystems (jinaai/,
+# intfloat/, etc.). Cloud model names (``voyage-*``, ``text-embedding-*``)
+# don't contain ``/`` so they're unaffected.
+_HF_PREFIXES: tuple[str, ...] = (
+    "sentence-transformers/",
+    "Qwen/",
+    "BAAI/",
+    "intfloat/",
+    "jinaai/",
+    "nomic-ai/",
+    "google/",
+    "microsoft/",
+    "mixedbread-ai/",
+)
+
+# Short aliases for the two open-source production picks.
+_MODEL_ALIASES: dict[str, str] = {
+    "qwen": "Qwen/Qwen3-Embedding-8B",
+    "qwen3": "Qwen/Qwen3-Embedding-8B",
+    "qwen3-8b": "Qwen/Qwen3-Embedding-8B",
+    "qwen3-4b": "Qwen/Qwen3-Embedding-4B",
+    "qwen3-0.6b": "Qwen/Qwen3-Embedding-0.6B",
+    "qwen3-dev": "Qwen/Qwen3-Embedding-0.6B",
+    "bge-m3": "BAAI/bge-m3",
+    "bgem3": "BAAI/bge-m3",
+    "minilm": "sentence-transformers/all-MiniLM-L6-v2",
+    "mpnet": "sentence-transformers/all-mpnet-base-v2",
+}
+
+
+def _is_hf_model_name(name: str) -> bool:
+    return any(name.startswith(p) for p in _HF_PREFIXES)
+
+
 def get_embedder(
     backend: str | None = None,
     *,
@@ -205,23 +252,36 @@ def get_embedder(
 
     Recognised backends (case-insensitive, with aliases):
 
-    * ``voyage`` — Voyage AI (`voyage-law-2` default), needs ``VOYAGE_API_KEY``.
+    * ``sentence-transformers`` / ``st`` / ``local`` / ``hf`` — fully-local
+      via ``sentence-transformers``. Default model
+      ``Qwen/Qwen3-Embedding-8B`` (4096-d). Short aliases also accepted as
+      ``--backend qwen | qwen3-0.6b | bge-m3 | minilm``.
+    * ``voyage`` — Voyage AI cloud, needs ``VOYAGE_API_KEY``.
     * ``openai`` — OpenAI embeddings, needs ``OPENAI_API_KEY``.
-    * ``sentence-transformers`` / ``st`` / ``local`` — fully-local model
-      via ``sentence-transformers`` (default ``all-MiniLM-L6-v2``, 384-dim).
     * ``fake`` — deterministic SHA-256 stub for tests / offline.
 
-    Resolution order when ``backend`` is None: voyage → openai → fake.
-    Sentence-Transformers must be requested explicitly (it downloads a model
-    on first use, which we don't want to do silently).
+    Resolution order when ``backend`` is None: if the configured
+    ``embedding_model`` looks like an HF path (``org/model``) →
+    sentence-transformers; else Voyage if its key is set; else OpenAI if
+    its key is set; else ``fake``.
     """
     settings = settings or get_settings()
+    chosen_model = model or settings.embedding_model
+
+    # Convenience alias resolution — `--model qwen` works without typing the
+    # full HF path. Settings-level overrides should already use canonical
+    # names so this mainly serves the CLI ergonomics.
+    if chosen_model in _MODEL_ALIASES:
+        chosen_model = _MODEL_ALIASES[chosen_model]
+    if backend in _MODEL_ALIASES:
+        chosen_model = _MODEL_ALIASES[backend]
+        backend = "sentence-transformers"
+
     if backend is None:
-        if settings.voyage_api_key:
-            backend = "voyage"
-        elif settings.embedding_model.startswith("sentence-transformers/"):
-            # Explicit local model wired in .env -> use it.
+        if _is_hf_model_name(chosen_model):
             backend = "sentence-transformers"
+        elif settings.voyage_api_key:
+            backend = "voyage"
         else:
             import os
 
@@ -233,7 +293,7 @@ def get_embedder(
             raise RuntimeError("VOYAGE_API_KEY is not set; cannot use Voyage embedder.")
         return VoyageEmbedder(
             api_key=settings.voyage_api_key,
-            model=model or settings.embedding_model,
+            model=chosen_model,
             dim=settings.embedding_dim,
         )
     if backend == "openai":
@@ -242,21 +302,14 @@ def get_embedder(
         key = os.environ.get("OPENAI_API_KEY", "")
         if not key:
             raise RuntimeError("OPENAI_API_KEY is not set; cannot use OpenAI embedder.")
-        return OpenAIEmbedder(api_key=key, model=model or settings.embedding_fallback_model)
-    if backend in {"sentence-transformers", "st", "local", "minilm"}:
-        # Pin model from arg → settings → MiniLM. Settings is authoritative
-        # so EMBEDDING_MODEL in .env works for every CLI subcommand.
-        chosen_model = model
-        if chosen_model is None:
-            if settings.embedding_model.startswith("sentence-transformers/"):
-                chosen_model = settings.embedding_model
-            else:
-                chosen_model = "sentence-transformers/all-MiniLM-L6-v2"
+        return OpenAIEmbedder(api_key=key, model=chosen_model)
+    if backend in {"sentence-transformers", "st", "local", "hf"}:
         return SentenceTransformerEmbedder(model=chosen_model, device=device)
     if backend == "fake":
         return FakeEmbedder(dim=settings.embedding_dim)
     raise ValueError(
-        f"unknown embedder backend {backend!r}; pick voyage / openai / sentence-transformers / fake"
+        f"unknown embedder backend {backend!r}; "
+        "pick sentence-transformers / voyage / openai / fake (or short aliases qwen / bge-m3 / minilm)."
     )
 
 

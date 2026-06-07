@@ -9,8 +9,8 @@ def test_defaults_load() -> None:
     s = Settings(_env_file=None)
     assert s.neo4j_uri.startswith("bolt://")
     assert s.neo4j_user == "neo4j"
-    assert s.embedding_model == "voyage-law-2"
-    assert s.embedding_dim == 1024
+    assert s.embedding_model == "Qwen/Qwen3-Embedding-8B"
+    assert s.embedding_dim == 4096
 
 
 def test_env_overrides(monkeypatch) -> None:
