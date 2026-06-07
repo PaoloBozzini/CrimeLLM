@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 # Mirrors clg.models.Treatment but redefined here so a fresh import path
-# doesn't trip over the dataclass module.
+# doesn't trip over the dataclass module. Common-law labels first, then the
+# civil-law set (DK Højesteret-style departures).
 TreatmentLabel = Literal[
     "followed",
     "applied",
@@ -29,6 +30,8 @@ TreatmentLabel = Literal[
     "reversed",
     "affirmed",
     "neutral",
+    "departed_from",
+    "criticised",
 ]
 
 TREATMENT_VOCAB: tuple[TreatmentLabel, ...] = (
@@ -42,6 +45,8 @@ TREATMENT_VOCAB: tuple[TreatmentLabel, ...] = (
     "reversed",
     "affirmed",
     "neutral",
+    "departed_from",
+    "criticised",
 )
 
 LABEL_TO_ID: dict[str, int] = {label: i for i, label in enumerate(TREATMENT_VOCAB)}

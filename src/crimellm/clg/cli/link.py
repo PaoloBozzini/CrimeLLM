@@ -3,20 +3,81 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Annotated
 
 import typer
-
-from ._common import PENDING
 
 app = typer.Typer(help="Citation + treatment extraction (Phase 1/5).", no_args_is_help=True)
 
 
 @app.command("citations")
-def citations() -> None:
-    """Extract citations via eyecite (Phase 1)."""
-    typer.echo(PENDING)
-    raise typer.Exit(code=1)
+def citations(
+    text: Annotated[
+        str | None,
+        typer.Option("--text", help="Raw text to scan for citations."),
+    ] = None,
+    file: Annotated[
+        Path | None,
+        typer.Option("--file", "-f", help="Read text from this file instead of --text."),
+    ] = None,
+    jurisdiction: Annotated[
+        str | None,
+        typer.Option(
+            "--jurisdiction",
+            "-j",
+            help="Restrict to one jurisdiction (US|EW|UK|EU|DK). "
+            "Default: all parsers whose code is in enabled_jurisdictions.",
+        ),
+    ] = None,
+) -> None:
+    """Run the per-jurisdiction citation parsers over a text blob.
+
+    Dispatches through ``link.cite_registry``. Removing a jurisdiction from
+    ``ENABLED_JURISDICTIONS`` (or via ``--jurisdiction``) skips that parser.
+    """
+    from ..config import get_settings
+    from ..link import extract_all, for_jurisdiction, parsers_for_enabled
+
+    if text is None and file is None:
+        raise typer.BadParameter("pass --text or --file")
+    if text is not None and file is not None:
+        raise typer.BadParameter("--text and --file are mutually exclusive")
+    body = file.read_text(encoding="utf-8") if file else (text or "")
+
+    settings = get_settings()
+    if jurisdiction:
+        if not settings.is_enabled(jurisdiction):
+            raise typer.BadParameter(
+                f"{jurisdiction!r} is not in enabled_jurisdictions={settings.enabled_jurisdictions}"
+            )
+        parser = for_jurisdiction(jurisdiction)
+        if parser is None:
+            raise typer.BadParameter(f"no parser registered for {jurisdiction!r}")
+        hits = extract_all(body, parsers=[parser])
+    else:
+        hits = extract_all(body, parsers=parsers_for_enabled(settings))
+
+    typer.echo(
+        json.dumps(
+            {
+                "jurisdictions": sorted({h.jurisdiction for h in hits}),
+                "count": len(hits),
+                "hits": [
+                    {
+                        "raw": h.raw,
+                        "normalised_id": h.normalised_id,
+                        "kind": h.kind,
+                        "span": list(h.span),
+                        "jurisdiction": h.jurisdiction,
+                    }
+                    for h in hits
+                ],
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
 
 @app.command("distill")

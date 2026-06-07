@@ -7,6 +7,19 @@ Tier 4: Claude Haiku with prompt caching (``treatment_anthropic``).
 Orchestrator: ``treatment_cascade.CascadeClassifier`` with per-tier thresholds.
 """
 
+from . import cite_dk, cite_eu, cite_us  # noqa: F401 — side-effect: register parsers
+from .cite_registry import (
+    CitationHit,
+    CitationKind,
+    CitationParser,
+    all_parsers,
+    extract_all,
+    for_jurisdiction,
+    parsers_for_enabled,
+    register,
+    registered_jurisdictions,
+    unregister,
+)
 from .citation_context import extract_citing_sentence
 from .distill import (
     DistillSample,
@@ -61,4 +74,15 @@ __all__ = [
     "train_distilled_head",
     "classification_report_text",
     "teacher_agreement",
+    # Citation registry (Phase 1)
+    "CitationHit",
+    "CitationKind",
+    "CitationParser",
+    "register",
+    "unregister",
+    "for_jurisdiction",
+    "all_parsers",
+    "registered_jurisdictions",
+    "parsers_for_enabled",
+    "extract_all",
 ]
