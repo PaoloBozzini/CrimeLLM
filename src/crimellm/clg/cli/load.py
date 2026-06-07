@@ -132,6 +132,47 @@ def courtlistener(
     )
 
 
+@app.command("eurlex")
+def eurlex(
+    celex: Annotated[
+        str,
+        typer.Option(
+            "--celex",
+            help="CSV of CELEX ids to load. Each must be downloaded already.",
+        ),
+    ],
+    langs: Annotated[
+        str,
+        typer.Option("--lang", help="CSV of language codes matching --lang at ingest."),
+    ] = "en",
+    fmt: Annotated[
+        str, typer.Option("--fmt", help="EUR-Lex format param.")
+    ] = "fmx4",
+) -> None:
+    """Parse cached EUR-Lex XML + MERGE into Neo4j (Instrument, Provision, Case, IMPLEMENTS)."""
+    from ..config import get_settings
+    from ..ingest._base import IngestContext
+    from ..ingest.eurlex import EurLexSource
+
+    s = get_settings()
+    if not s.is_enabled("EU"):
+        raise typer.BadParameter(
+            f"'EU' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
+        )
+
+    ids = tuple(c.strip() for c in celex.split(",") if c.strip())
+    if not ids:
+        raise typer.BadParameter("--celex produced no ids")
+    languages = tuple(l.strip().lower() for l in langs.split(",") if l.strip())
+
+    store = get_store()
+    store.verify()
+    src = EurLexSource(celex_ids=ids, languages=languages, fmt=fmt)
+    ctx = IngestContext(store=store)
+    report = src.load(ctx)
+    typer.echo(json.dumps({"source": report.source, **report.counts, **report.extras}, indent=2))
+
+
 @app.command("legislation-uk")
 def legislation_uk(
     versions: Annotated[

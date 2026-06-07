@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+from typing import Annotated
+
 import typer
 
 from ._common import PENDING
@@ -19,3 +23,60 @@ def uslm() -> None:
 def akoma_ntoso() -> None:
     typer.echo(PENDING)
     raise typer.Exit(code=1)
+
+
+@app.command("eurlex")
+def eurlex(
+    file: Annotated[
+        Path,
+        typer.Option("--file", "-f", help="Cached EUR-Lex AKN / FORMEX XML body."),
+    ],
+    kind: Annotated[
+        str,
+        typer.Option(
+            "--kind",
+            help="'regulation' | 'directive' | 'judgment'. Drives which parser runs.",
+        ),
+    ] = "regulation",
+    celex: Annotated[
+        str | None,
+        typer.Option("--celex", help="Override CELEX (else read from FRBRalias)."),
+    ] = None,
+    language: Annotated[str, typer.Option("--lang", help="ISO 639-1 language code.")] = "en",
+) -> None:
+    """Parse a single cached EUR-Lex XML and print the extracted entities as JSON."""
+    from ..parse import eurlex as P
+
+    if kind in {"regulation", "directive", "decision", "legislation"}:
+        pr = P.parse_regulation_file(file, celex=celex, language=language)
+        out = {
+            "kind": "legislation",
+            "instrument_id": pr.instrument.id,
+            "short_title": pr.instrument.short_title,
+            "year": pr.instrument.year,
+            "provisions": [
+                {
+                    "id": p.id,
+                    "section_path": p.section_path,
+                    "valid_from": str(p.valid_from) if p.valid_from else None,
+                    "text_preview": (p.text or "")[:200],
+                }
+                for p in pr.provisions
+            ],
+            "cites_celex": pr.cites_celex,
+        }
+    elif kind == "judgment":
+        jp = P.parse_judgment_file(file, celex=celex, language=language)
+        out = {
+            "kind": "judgment",
+            "case_id": jp.case.id,
+            "name": jp.case.name,
+            "decision_date": str(jp.case.decision_date) if jp.case.decision_date else None,
+            "court_id": jp.case.court_id,
+            "cites_ecli": jp.cites_ecli,
+            "cites_celex": jp.cites_celex,
+            "body_preview": jp.body_text[:300],
+        }
+    else:
+        raise typer.BadParameter(f"unknown --kind {kind!r}; pick regulation|directive|judgment")
+    typer.echo(json.dumps(out, indent=2, ensure_ascii=False))

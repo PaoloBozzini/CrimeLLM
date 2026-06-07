@@ -461,6 +461,62 @@ def search_chunks(
     return rows
 
 
+# --- IMPLEMENTS (Instrument -> Instrument) --------------------------------
+
+# Cross-jurisdiction transposition edge. DK lbk implementing an EU directive,
+# or one EU regulation implementing another. Both sides must already exist
+# as Instrument nodes — load_implements ignores rows whose target is missing
+# so partial ingest (DK alone, no EU yet) doesn't crash.
+_CYPHER_IMPLEMENTS = """
+UNWIND $rows AS row
+MATCH (src:Instrument {id: row.source_id})
+MATCH (tgt:Instrument {id: row.target_id})
+MERGE (src)-[r:IMPLEMENTS]->(tgt)
+  ON CREATE SET r.raw_ref = row.raw_ref,
+                r.created_at = datetime()
+  ON MATCH  SET r.raw_ref = coalesce(row.raw_ref, r.raw_ref)
+"""
+
+
+def load_implements(
+    edges: Iterable[Any],
+    *,
+    batch_size: int = 2000,
+    store: Neo4jStore | None = None,
+) -> int:
+    """MERGE ``(Instrument)-[:IMPLEMENTS]->(Instrument)`` edges.
+
+    Accepts an iterable of ``(source_id, target_id)`` tuples,
+    ``(source_id, target_id, raw_ref)`` triples, or dicts with those keys.
+    Rows whose source or target instrument is missing from the graph are
+    silently skipped — typical when one side ingested before the other.
+    """
+    store = store or get_store()
+
+    def _normalise(row: Any) -> dict[str, Any]:
+        if isinstance(row, dict):
+            return {
+                "source_id": row["source_id"],
+                "target_id": row["target_id"],
+                "raw_ref": row.get("raw_ref"),
+            }
+        if len(row) == 2:
+            src, tgt = row
+            return {"source_id": src, "target_id": tgt, "raw_ref": None}
+        src, tgt, raw_ref = row
+        return {"source_id": src, "target_id": tgt, "raw_ref": raw_ref}
+
+    total = 0
+    with store.session() as s:
+        for batch in _chunks(edges, batch_size):
+            payload = [_normalise(r) for r in batch]
+            if not payload:
+                continue
+            s.run(_CYPHER_IMPLEMENTS, rows=payload)
+            total += len(payload)
+    return total
+
+
 # --- INTERPRETS (Case -> Provision) ----------------------------------------
 
 # For each (case, ref) we pick the Provision version valid on the case's

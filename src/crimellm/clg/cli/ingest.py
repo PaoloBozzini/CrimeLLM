@@ -138,6 +138,50 @@ def legislation_uk(
     typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
 
 
+@app.command("eurlex")
+def eurlex(
+    celex: Annotated[
+        str,
+        typer.Option(
+            "--celex",
+            help="CSV of CELEX ids to fetch, e.g. 32016R0679,32019L0770,62012CJ0131.",
+        ),
+    ],
+    langs: Annotated[
+        str,
+        typer.Option(
+            "--lang",
+            help="CSV of ISO 639-1 language codes. Default 'en'. EU bodies "
+            "publish in 24 languages; 'da,en' is the firm default.",
+        ),
+    ] = "en",
+    fmt: Annotated[
+        str,
+        typer.Option(
+            "--fmt",
+            help="EUR-Lex format param: 'fmx4' (FORMEX) or 'xhtml_akn' "
+            "(Akoma Ntoso, where available).",
+        ),
+    ] = "fmx4",
+) -> None:
+    """Download EUR-Lex / CELLAR bodies for the given CELEX ids."""
+    s = get_settings()
+    if not s.is_enabled("EU"):
+        raise typer.BadParameter(
+            f"'EU' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
+        )
+    from ..ingest._base import IngestContext
+    from ..ingest.eurlex import EurLexSource
+
+    ids = tuple(c.strip() for c in celex.split(",") if c.strip())
+    if not ids:
+        raise typer.BadParameter("--celex produced no ids")
+    languages = tuple(l.strip().lower() for l in langs.split(",") if l.strip())
+    src = EurLexSource(celex_ids=ids, languages=languages, fmt=fmt)
+    paths = src.download(IngestContext())
+    typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
+
+
 @app.command("find-case-law")
 def find_case_law() -> None:
     """TNA Find Case Law judgments — requires computational-analysis licence (Phase 2)."""

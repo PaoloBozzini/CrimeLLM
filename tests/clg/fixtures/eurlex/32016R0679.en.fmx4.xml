@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<akomaNtoso xmlns="http://docs.oasis-open.org/legaldocml/ns/akn/3.0">
+  <act name="regulation">
+    <meta>
+      <identification source="#pubofficeEU">
+        <FRBRWork>
+          <FRBRthis value="/akn/eu/act/regulation/2016-04-27/2016-679"/>
+          <FRBRalias name="CELEX" value="32016R0679"/>
+          <FRBRalias name="ELI" value="eli/reg/2016/679"/>
+          <FRBRdate date="2016-04-27" name="adoption"/>
+          <FRBRnumber value="679"/>
+          <FRBRcountry value="eu"/>
+        </FRBRWork>
+        <FRBRExpression>
+          <FRBRlanguage language="eng"/>
+        </FRBRExpression>
+      </identification>
+    </meta>
+    <preface>
+      <docTitle>REGULATION (EU) 2016/679 OF THE EUROPEAN PARLIAMENT AND OF THE COUNCIL of 27 April 2016 on the protection of natural persons</docTitle>
+    </preface>
+    <preamble>
+      <p>Having regard to Directive 95/46/EC (31995L0046), repealed by this Regulation.</p>
+      <p>See also Regulation (EC) 45/2001 (32001R0045) which complements this framework.</p>
+      <authorialNote>
+        <p>Implements Directive 32002L0058 partially.</p>
+      </authorialNote>
+    </preamble>
+    <body>
+      <article eId="art_1">
+        <num>Article 1</num>
+        <heading>Subject-matter and objectives</heading>
+        <paragraph eId="art_1__para_1">
+          <num>1.</num>
+          <content>
+            <p>This Regulation lays down rules relating to the protection of natural persons with regard to the processing of personal data.</p>
+          </content>
+        </paragraph>
+        <paragraph eId="art_1__para_2">
+          <num>2.</num>
+          <content>
+            <p>This Regulation protects fundamental rights and freedoms of natural persons.</p>
+          </content>
+        </paragraph>
+      </article>
+      <article eId="art_6">
+        <num>Article 6</num>
+        <heading>Lawfulness of processing</heading>
+        <paragraph eId="art_6__para_1">
+          <num>1.</num>
+          <content>
+            <p>Processing shall be lawful only if and to the extent that at least one of the following applies.</p>
+          </content>
+        </paragraph>
+      </article>
+    </body>
+  </act>
+</akomaNtoso>

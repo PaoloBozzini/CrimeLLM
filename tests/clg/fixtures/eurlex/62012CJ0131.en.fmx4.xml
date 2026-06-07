@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<akomaNtoso xmlns="http://docs.oasis-open.org/legaldocml/ns/akn/3.0">
+  <judgment>
+    <meta>
+      <identification source="#cjeu">
+        <FRBRWork>
+          <FRBRthis value="/akn/eu/judgment/2014-05-13/c-131-12"/>
+          <FRBRalias name="ECLI" value="ECLI:EU:C:2014:317"/>
+          <FRBRalias name="CELEX" value="62012CJ0131"/>
+          <FRBRdate date="2014-05-13" name="judgment"/>
+          <FRBRcountry value="eu"/>
+        </FRBRWork>
+        <FRBRExpression>
+          <FRBRlanguage language="eng"/>
+        </FRBRExpression>
+      </identification>
+    </meta>
+    <preface>
+      <docTitle>JUDGMENT OF THE COURT (Grand Chamber) of 13 May 2014 in Google Spain v AEPD and Mario Costeja Gonzalez</docTitle>
+    </preface>
+    <body>
+      <part>
+        <content>
+          <p>The Court interprets Directive 32001L0095 in light of the present matter. See also ECLI:EU:C:2003:294 and earlier ECLI:EU:C:1995:411.</p>
+          <p>Reference is made to Regulation 32016R0679 in the context of subsequent legislation.</p>
+        </content>
+      </part>
+    </body>
+  </judgment>
+</akomaNtoso>
