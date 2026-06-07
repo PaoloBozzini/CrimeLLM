@@ -138,6 +138,40 @@ def legislation_uk(
     typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
 
 
+@app.command("retsinformation")
+def retsinformation(
+    items: Annotated[
+        str,
+        typer.Option(
+            "--items",
+            help="CSV of slash-form DK statute ids, e.g. "
+            "'lbk/2018/502,lov/2023/1100,bek/2024/42'.",
+        ),
+    ],
+) -> None:
+    """Download Danish primary law from retsinformation.dk by ELI."""
+    s = get_settings()
+    if not s.is_enabled("DK"):
+        raise typer.BadParameter(
+            f"'DK' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
+        )
+    from ..ingest._base import IngestContext
+    from ..ingest.retsinformation import RetsinformationSource
+
+    triples: list[tuple[str, int, int]] = []
+    for s_ in items.split(","):
+        parts = s_.strip().split("/")
+        if len(parts) != 3:
+            raise typer.BadParameter(
+                f"bad --items entry {s_!r}; want '<doc_type>/<year>/<num>'"
+            )
+        triples.append((parts[0], int(parts[1]), int(parts[2])))
+
+    src = RetsinformationSource(items=tuple(triples))
+    paths = src.download(IngestContext())
+    typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
+
+
 @app.command("eurlex")
 def eurlex(
     celex: Annotated[

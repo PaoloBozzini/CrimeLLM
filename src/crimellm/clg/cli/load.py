@@ -132,6 +132,55 @@ def courtlistener(
     )
 
 
+@app.command("retsinformation")
+def retsinformation(
+    items: Annotated[
+        str,
+        typer.Option(
+            "--items",
+            help="CSV of slash-form DK statute ids. Each must be downloaded already.",
+        ),
+    ],
+    explode_subparagraphs: Annotated[
+        bool,
+        typer.Option(
+            "--explode-subparagraphs/--fold-subparagraphs",
+            help="True (default): stk/nr become separate Provision nodes for "
+            "finer retrieval. False: fold into the parent § text.",
+        ),
+    ] = True,
+) -> None:
+    """Parse cached Retsinformation XML + MERGE into Neo4j (Instruments, Provisions, IMPLEMENTS)."""
+    from ..config import get_settings
+    from ..ingest._base import IngestContext
+    from ..ingest.retsinformation import RetsinformationSource
+
+    s = get_settings()
+    if not s.is_enabled("DK"):
+        raise typer.BadParameter(
+            f"'DK' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
+        )
+
+    triples: list[tuple[str, int, int]] = []
+    for s_ in items.split(","):
+        parts = s_.strip().split("/")
+        if len(parts) != 3:
+            raise typer.BadParameter(
+                f"bad --items entry {s_!r}; want '<doc_type>/<year>/<num>'"
+            )
+        triples.append((parts[0], int(parts[1]), int(parts[2])))
+
+    store = get_store()
+    store.verify()
+    src = RetsinformationSource(
+        items=tuple(triples),
+        explode_subparagraphs=explode_subparagraphs,
+    )
+    ctx = IngestContext(store=store)
+    report = src.load(ctx)
+    typer.echo(json.dumps({"source": report.source, **report.counts, **report.extras}, indent=2))
+
+
 @app.command("eurlex")
 def eurlex(
     celex: Annotated[

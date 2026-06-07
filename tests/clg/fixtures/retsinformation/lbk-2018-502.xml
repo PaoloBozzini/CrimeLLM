@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dokument xmlns="https://www.retsinformation.dk/ns/dokument">
+  <meta name="titel" value="Databeskyttelsesloven"/>
+  <meta name="publikationsdato" value="2018-05-23"/>
+  <meta name="ikrafttraedelse" value="2018-05-25"/>
+  <praeambel>
+    <p>Denne lov gennemfører Europa-Parlamentets og Rådets forordning (EU) 2016/679 af 27. april 2016 om beskyttelse af fysiske personer.</p>
+    <p>Loven supplerer endvidere direktiv 2016/680 om behandling af personoplysninger i strafferetlig sammenhæng.</p>
+  </praeambel>
+  <indhold>
+    <paragraf nr="1">
+      <overskrift>Lovens anvendelsesområde</overskrift>
+      <stk nr="1">
+        <p>Loven supplerer reglerne i databeskyttelsesforordningen.</p>
+      </stk>
+      <stk nr="2">
+        <p>Loven gælder for behandling af personoplysninger som nævnt i databeskyttelsesforordningens artikel 2.</p>
+      </stk>
+    </paragraf>
+    <paragraf nr="6">
+      <overskrift>Behandling af almindelige kategorier af personoplysninger</overskrift>
+      <stk nr="1">
+        <nr nr="1">
+          <p>Behandling af personoplysninger må kun finde sted, hvis mindst en af betingelserne i databeskyttelsesforordningens artikel 6, stk. 1, er opfyldt.</p>
+        </nr>
+        <nr nr="2">
+          <p>Behandling kan ske, hvis den registrerede har givet samtykke.</p>
+        </nr>
+      </stk>
+    </paragraf>
+    <paragraf nr="36">
+      <stk nr="1">
+        <p>Klager over Datatilsynets afgørelser kan ikke indbringes for anden administrativ myndighed.</p>
+      </stk>
+    </paragraf>
+  </indhold>
+</dokument>

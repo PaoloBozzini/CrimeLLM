@@ -25,6 +25,57 @@ def akoma_ntoso() -> None:
     raise typer.Exit(code=1)
 
 
+@app.command("retsinformation")
+def retsinformation(
+    file: Annotated[
+        Path,
+        typer.Option("--file", "-f", help="Cached Retsinformation XML body."),
+    ],
+    doc_type: Annotated[
+        str,
+        typer.Option(
+            "--doc-type",
+            help="DK doc type: lov|lbk|bek|ltc|vejledning.",
+        ),
+    ],
+    year: Annotated[int, typer.Option("--year")],
+    num: Annotated[int, typer.Option("--num")],
+    explode_subparagraphs: Annotated[
+        bool,
+        typer.Option(
+            "--explode-subparagraphs/--fold-subparagraphs",
+            help="True: stk/nr → separate Provisions. False: fold into § text.",
+        ),
+    ] = True,
+) -> None:
+    """Parse a single cached Retsinformation XML; print extracted entities as JSON."""
+    from ..parse import retsinformation as P
+
+    pr = P.parse_statute_file(
+        file,
+        doc_type=doc_type,
+        year=year,
+        num=num,
+        explode_subparagraphs=explode_subparagraphs,
+    )
+    out = {
+        "instrument_id": pr.instrument.id,
+        "short_title": pr.instrument.short_title,
+        "year": pr.instrument.year,
+        "provisions": [
+            {
+                "id": p.id,
+                "section_path": p.section_path,
+                "valid_from": str(p.valid_from) if p.valid_from else None,
+                "text_preview": (p.text or "")[:200],
+            }
+            for p in pr.provisions
+        ],
+        "cites_eu_celex": pr.cites_eu_celex,
+    }
+    typer.echo(json.dumps(out, indent=2, ensure_ascii=False))
+
+
 @app.command("eurlex")
 def eurlex(
     file: Annotated[

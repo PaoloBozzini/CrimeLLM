@@ -3,9 +3,10 @@
 Two knobs come out:
 
 * ``jurisdiction`` — defaults to ``None`` (cross-jurisdiction). Heuristics
-  bump it to ``US`` / ``UK`` / ``EW`` when the question makes it obvious
-  ("U.S. Code §...", "Fraud Act 2006 s.2"). CLI ``--jurisdiction`` always
-  wins over inference.
+  bump it to ``US`` / ``UK`` / ``EW`` / ``EU`` / ``DK`` when the question
+  makes it obvious ("U.S. Code §...", "Fraud Act 2006 s.2", "straffelovens
+  § 279", "Article 101 TFEU"). CLI ``--jurisdiction`` always wins over
+  inference.
 * ``as_of`` — defaults to today (UTC). An explicit ISO date anywhere in the
   prompt ("as of 2018-05-12") overrides. CLI ``--as-of`` always wins.
 
@@ -26,7 +27,7 @@ __all__ = ["Jurisdiction", "Query", "parse_query"]
 _ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
 # Cue phrases that bias jurisdiction. Conservative: when in doubt, no bias.
-_US_CUES = (
+_US_CUES: tuple[str, ...] = (
     "u.s.c",
     "usc",
     "us code",
@@ -40,7 +41,7 @@ _US_CUES = (
     "supreme court of the united states",
     "courtlistener",
 )
-_UK_CUES = (
+_UK_CUES: tuple[str, ...] = (
     "uk",
     "united kingdom",
     "england",
@@ -56,6 +57,75 @@ _UK_CUES = (
     "theft act",
     "bribery act",
     "modern slavery act",
+)
+# Danish primary-law cues: portal name, doc-type prefixes, court tiers,
+# named statutes, reporter shorthands, ECLI scheme. Lower-cased before
+# substring match. Genitive forms ("straffelovens") substring-hit the bare
+# stem ("straffeloven") so listing both isn't necessary.
+_DK_CUES: tuple[str, ...] = (
+    "retsinformation",
+    "retsinformation.dk",
+    "lovbekendtgørelse",
+    "lbk nr",
+    "bek nr",
+    "lbk ",
+    "bek ",
+    "højesteret",
+    "landsret",
+    "østre landsret",
+    "vestre landsret",
+    "byret",
+    "straffeloven",
+    "aftaleloven",
+    "markedsføringsloven",
+    "databeskyttelsesloven",
+    "erstatningsansvarsloven",
+    "købeloven",
+    "forbrugeraftaleloven",
+    "forvaltningsloven",
+    "udlændingeloven",
+    "retsplejeloven",
+    "selskabsloven",
+    "u.20",
+    "u.19",
+    "fed ",
+    "tfk ",
+    "mad ",
+    "ecli:dk:",
+)
+# EU primary-law cues: EUR-Lex / CELLAR portal names, treaty abbreviations,
+# institution names (EN + DA), CELEX/ECLI schemes, common acts.
+_EU_CUES: tuple[str, ...] = (
+    "eur-lex",
+    "eurlex",
+    "cellar",
+    "cjeu",
+    "court of justice of the european union",
+    "european court of justice",
+    "general court",
+    "tfeu",
+    "tfeuf",
+    "teu",
+    "gdpr",
+    "ecli:eu:",
+    "regulation (eu)",
+    "regulation (ec)",
+    "directive (eu)",
+    "direktiv",
+    "forordning",
+    "kommissionen",
+    "rådet",
+    "europa-parlamentet",
+    "european parliament",
+    "european commission",
+    "council of the european union",
+)
+
+_CUE_TABLE: tuple[tuple[Jurisdiction, tuple[str, ...]], ...] = (
+    ("US", _US_CUES),
+    ("UK", _UK_CUES),
+    ("EU", _EU_CUES),
+    ("DK", _DK_CUES),
 )
 
 
@@ -88,14 +158,24 @@ class Query:
 
 
 def _infer_jurisdiction(text: str) -> Jurisdiction | None:
+    """Pick the jurisdiction whose cue list scores the most hits.
+
+    Ties (incl. all-zero) return ``None`` so a cross-jurisdiction question
+    or a question with no cues stays uncategorised. The CLI / caller can
+    always override via ``Query.with_overrides(jurisdiction=...)``.
+    """
     lower = text.lower()
-    us = sum(1 for cue in _US_CUES if cue in lower)
-    uk = sum(1 for cue in _UK_CUES if cue in lower)
-    if us > uk and us > 0:
-        return "US"
-    if uk > us and uk > 0:
-        return "UK"
-    return None
+    scores: list[tuple[Jurisdiction, int]] = [
+        (code, sum(1 for cue in cues if cue in lower))
+        for code, cues in _CUE_TABLE
+    ]
+    top_code, top_score = max(scores, key=lambda kv: kv[1])
+    if top_score == 0:
+        return None
+    # Tie at the top → ambiguous → no bias.
+    if sum(1 for _, s in scores if s == top_score) > 1:
+        return None
+    return top_code
 
 
 def _infer_as_of(text: str) -> date:

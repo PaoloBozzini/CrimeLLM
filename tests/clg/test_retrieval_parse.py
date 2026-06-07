@@ -41,3 +41,48 @@ def test_with_overrides_replaces_fields() -> None:
 def test_with_overrides_accepts_date_obj() -> None:
     q = parse_query("anything").with_overrides(as_of=date(2010, 6, 1))
     assert q.as_of == date(2010, 6, 1)
+
+
+# --- DK + EU cue inference (Phase 4.5 / T7.1) -----------------------------
+
+
+def test_parse_query_infers_dk_named_statute() -> None:
+    q = parse_query("Hvad indebærer straffelovens § 279 om bedrageri?")
+    assert q.jurisdiction == "DK"
+
+
+def test_parse_query_infers_dk_court_tier() -> None:
+    q = parse_query("Har Højesteret afgjort om aftalelovens § 36 i forbrugersager?")
+    assert q.jurisdiction == "DK"
+
+
+def test_parse_query_infers_dk_ecli() -> None:
+    q = parse_query("Hvordan fortolkes ECLI:DK:HR:2023:123?")
+    assert q.jurisdiction == "DK"
+
+
+def test_parse_query_infers_eu_treaty() -> None:
+    q = parse_query("How does Article 101 TFEU apply to vertical agreements?")
+    assert q.jurisdiction == "EU"
+
+
+def test_parse_query_infers_eu_gdpr() -> None:
+    q = parse_query("Has the CJEU interpreted GDPR Article 6(1)(f) on marketing?")
+    assert q.jurisdiction == "EU"
+
+
+def test_parse_query_infers_eu_danish_phrasing() -> None:
+    # Danish caller asking about an EU instrument — EU cues outscore DK.
+    q = parse_query("Hvordan har EU-Kommissionen og Rådet anvendt forordning 2016/679?")
+    assert q.jurisdiction == "EU"
+
+
+def test_parse_query_ties_return_none() -> None:
+    # Equal hits on DK + EU → no bias.
+    q = parse_query("straffelovens § 279 og TFEU artikel 101")
+    assert q.jurisdiction is None
+
+
+def test_parse_query_no_cues_returns_none() -> None:
+    q = parse_query("a generic question about something legal")
+    assert q.jurisdiction is None
