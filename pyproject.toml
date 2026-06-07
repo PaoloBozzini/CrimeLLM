@@ -50,7 +50,7 @@ airllm-cuda = ["airllm>=2.11", "bitsandbytes>=0.43", "accelerate>=1.0", "optimum
 airllm-mlx = ["airllm>=2.11", "mlx>=0.18", "optimum>=1.13,<1.21"]
 # Anthropic Claude API.
 anthropic = ["anthropic>=0.40"]
-# Common Legal Graph (clg) pipeline: Neo4j graph RAG over US + UK primary law.
+# Common Legal Graph (clg) pipeline: Neo4j graph RAG over US + UK + EU + DK primary law.
 clg = [
     "neo4j>=5.26",
     "typer>=0.12",
@@ -63,6 +63,8 @@ clg = [
     "anthropic>=0.40",
     "tenacity>=9.0",
     "python-dateutil>=2.9",
+    # DK case-law PDFs (domstol.dk) — Phase 5.
+    "pypdf>=5.0",
 ]
 # Convenience: everything (classifier + clg + zero-shot LLM extras).
 all = [

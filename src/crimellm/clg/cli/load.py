@@ -132,6 +132,44 @@ def courtlistener(
     )
 
 
+@app.command("domstol")
+def domstol(
+    items: Annotated[
+        str,
+        typer.Option(
+            "--items",
+            help="CSV of '<ECLI>|<URL>' pairs matching `clg ingest domstol`.",
+        ),
+    ],
+) -> None:
+    """Parse cached DK judgments + MERGE into Neo4j (Courts, Cases, citation hits)."""
+    from ..config import get_settings
+    from ..ingest._base import IngestContext
+    from ..ingest.domstol import DomstolSource, JudgmentRef
+
+    s = get_settings()
+    if not s.is_enabled("DK"):
+        raise typer.BadParameter(
+            f"'DK' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
+        )
+
+    refs: list[JudgmentRef] = []
+    for entry in items.split(","):
+        parts = entry.strip().split("|", 1)
+        if len(parts) != 2:
+            raise typer.BadParameter(
+                f"bad --items entry {entry!r}; want '<ECLI>|<URL>'"
+            )
+        refs.append(JudgmentRef(ecli=parts[0].strip(), url=parts[1].strip()))
+
+    store = get_store()
+    store.verify()
+    src = DomstolSource(items=tuple(refs))
+    ctx = IngestContext(store=store)
+    report = src.load(ctx)
+    typer.echo(json.dumps({"source": report.source, **report.counts, **report.extras}, indent=2))
+
+
 @app.command("retsinformation")
 def retsinformation(
     items: Annotated[

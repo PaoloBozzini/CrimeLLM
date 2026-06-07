@@ -138,6 +138,60 @@ def legislation_uk(
     typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
 
 
+@app.command("domstol")
+def domstol(
+    items: Annotated[
+        str,
+        typer.Option(
+            "--items",
+            help="CSV of '<ECLI>|<URL>' pairs (use | as delimiter inside a pair). "
+            "Example: 'ECLI:DK:HR:2023:1|https://domstol.dk/.../1.pdf,"
+            "ECLI:DK:OLR:2023:42|https://.../42.pdf'.",
+        ),
+    ],
+) -> None:
+    """Download DK judgments from domstol.dk by operator-supplied (ECLI, URL) list."""
+    s = get_settings()
+    if not s.is_enabled("DK"):
+        raise typer.BadParameter(
+            f"'DK' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
+        )
+    from ..ingest._base import IngestContext
+    from ..ingest.domstol import DomstolSource, JudgmentRef
+
+    refs: list[JudgmentRef] = []
+    for entry in items.split(","):
+        parts = entry.strip().split("|", 1)
+        if len(parts) != 2:
+            raise typer.BadParameter(
+                f"bad --items entry {entry!r}; want '<ECLI>|<URL>'"
+            )
+        refs.append(JudgmentRef(ecli=parts[0].strip(), url=parts[1].strip()))
+
+    src = DomstolSource(items=tuple(refs))
+    paths = src.download(IngestContext())
+    typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
+
+
+@app.command("karnov")
+def karnov() -> None:
+    """Commercial DK reporter (Karnov Online) — requires firm subscription."""
+    s = get_settings()
+    if not s.is_enabled("DK"):
+        raise typer.BadParameter(
+            f"'DK' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
+        )
+    if not s.karnov_api_key:
+        typer.echo(
+            "Refusing: KARNOV_API_KEY not set. The Karnov ingester is a "
+            "skeleton — the firm must hold a Karnov Online subscription "
+            "before this command can run. See ingest/karnov.py."
+        )
+        raise typer.Exit(code=2)
+    typer.echo(PENDING)
+    raise typer.Exit(code=1)
+
+
 @app.command("retsinformation")
 def retsinformation(
     items: Annotated[

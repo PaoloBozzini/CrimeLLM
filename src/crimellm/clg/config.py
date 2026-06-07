@@ -78,6 +78,13 @@ class Settings(BaseSettings):
     # Source-data licences
     tna_computational_licence_accepted: bool = Field(default=False)
 
+    # DK commercial reporter subscriptions (Karnov / Ufr). Both ingesters
+    # are skeletons until the firm confirms a subscription; the keys gate
+    # construction so a misconfigured run errors cleanly instead of
+    # silently building nothing.
+    karnov_api_key: str | None = Field(default=None)
+    ufr_api_key: str | None = Field(default=None)
+
     # Data paths
     data_root: Path = Field(default=Path("data"))
     raw_root: Path = Field(default=Path("data/raw"))

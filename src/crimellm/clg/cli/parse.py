@@ -25,6 +25,53 @@ def akoma_ntoso() -> None:
     raise typer.Exit(code=1)
 
 
+@app.command("domstol")
+def domstol(
+    file: Annotated[
+        Path,
+        typer.Option(
+            "--file",
+            "-f",
+            help="Cached judgment body — .pdf goes through pypdf; anything "
+            "else is read as UTF-8 text.",
+        ),
+    ],
+    ecli: Annotated[
+        str | None,
+        typer.Option(
+            "--ecli",
+            help="Override ECLI (else read from body via ECLI:DK: regex).",
+        ),
+    ] = None,
+    court_id: Annotated[
+        str | None,
+        typer.Option("--court-id", help="hr|olr|vlr|byret. Inferred from ECLI when omitted."),
+    ] = None,
+    name: Annotated[str | None, typer.Option("--name", help="Override case caption.")] = None,
+) -> None:
+    """Parse a single cached DK judgment; print extracted Case + citation hits."""
+    from ..parse import domstol as P
+
+    pr = P.parse_judgment_file(file, ecli=ecli, court_id=court_id, name=name)
+    out = {
+        "case_id": pr.case.id,
+        "court_id": pr.case.court_id,
+        "name": pr.case.name,
+        "decision_date": str(pr.case.decision_date) if pr.case.decision_date else None,
+        "body_preview": pr.body_text[:300],
+        "citation_hits": [
+            {
+                "raw": h.raw,
+                "normalised_id": h.normalised_id,
+                "kind": h.kind,
+                "jurisdiction": h.jurisdiction,
+            }
+            for h in pr.citation_hits
+        ],
+    }
+    typer.echo(json.dumps(out, indent=2, ensure_ascii=False))
+
+
 @app.command("retsinformation")
 def retsinformation(
     file: Annotated[
