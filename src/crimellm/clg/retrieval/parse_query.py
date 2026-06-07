@@ -18,9 +18,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Literal
 
-Jurisdiction = Literal["US", "EW", "UK"]
+from ..models import Jurisdiction
+
+__all__ = ["Jurisdiction", "Query", "parse_query"]
 
 _ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 

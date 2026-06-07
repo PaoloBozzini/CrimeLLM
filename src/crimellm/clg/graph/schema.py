@@ -71,6 +71,8 @@ JURISDICTION_SEEDS = [
     {"code": "US", "name": "United States"},
     {"code": "EW", "name": "England & Wales"},
     {"code": "UK", "name": "United Kingdom"},
+    {"code": "EU", "name": "European Union"},
+    {"code": "DK", "name": "Denmark"},
 ]
 
 

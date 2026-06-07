@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+_DEFAULT_ENABLED_JURISDICTIONS = ["US", "EW", "UK", "EU", "DK"]
 
 
 class Settings(BaseSettings):
@@ -40,6 +43,28 @@ class Settings(BaseSettings):
     data_root: Path = Field(default=Path("data"))
     raw_root: Path = Field(default=Path("data/raw"))
     interim_root: Path = Field(default=Path("data/interim"))
+
+    # Jurisdictions gated at ingest CLI + retrieval boundaries. Drop a code
+    # here to retire a jurisdiction without deleting code/data. Env var
+    # accepts CSV: ENABLED_JURISDICTIONS=US,EU,DK.
+    enabled_jurisdictions: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: list(_DEFAULT_ENABLED_JURISDICTIONS)
+    )
+
+    @field_validator("enabled_jurisdictions", mode="before")
+    @classmethod
+    def _parse_enabled_jurisdictions(cls, v: object) -> list[str]:
+        if v is None or v == "":
+            return list(_DEFAULT_ENABLED_JURISDICTIONS)
+        if isinstance(v, str):
+            parts = [s.strip().upper() for s in v.split(",")]
+            return [p for p in parts if p]
+        if isinstance(v, (list, tuple)):
+            return [str(x).strip().upper() for x in v if str(x).strip()]
+        raise TypeError(f"enabled_jurisdictions: unsupported type {type(v).__name__}")
+
+    def is_enabled(self, jurisdiction: str) -> bool:
+        return jurisdiction.upper() in {j.upper() for j in self.enabled_jurisdictions}
 
 
 @lru_cache(maxsize=1)

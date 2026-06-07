@@ -19,6 +19,8 @@ from typing import Literal
 
 import yaml
 
+from ..models import Jurisdiction
+
 TaskType = Literal[
     "single_fact",
     "multi_hop",
@@ -26,7 +28,8 @@ TaskType = Literal[
     "good_law",
     "no_fabrication",
 ]
-Jurisdiction = Literal["US", "EW", "UK"]
+
+__all__ = ["TaskType", "Jurisdiction", "GoldQuestion", "GoldSet", "load_gold_set"]
 
 
 @dataclass(slots=True)

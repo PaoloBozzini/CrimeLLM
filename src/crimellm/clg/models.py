@@ -16,9 +16,10 @@ from dataclasses import dataclass, field, fields
 from datetime import date, datetime
 from typing import Any, ClassVar, Literal
 
-Jurisdiction = Literal["US", "EW", "UK", "EU"]
+Jurisdiction = Literal["US", "EW", "UK", "EU", "DK"]
 
 Treatment = Literal[
+    # Common-law set (US/UK/EU CJEU)
     "followed",
     "applied",
     "considered",
@@ -29,6 +30,10 @@ Treatment = Literal[
     "reversed",
     "affirmed",
     "neutral",
+    # Civil-law set (DK Højesteret etc.) — Højesteret doesn't formally
+    # overrule prior judgments; it departs from / criticises them.
+    "departed_from",
+    "criticised",
 ]
 
 
