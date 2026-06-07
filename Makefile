@@ -1,6 +1,11 @@
 .PHONY: help up down logs install install-all graph-init graph-status graph-wipe \
         ingest-cl ingest-cl-status ingest-cl-index load-cl \
-        test lint format check clean-artifacts
+        test test-up test-down test-logs lint format check clean-artifacts
+
+TEST_NEO4J_URI ?= bolt://localhost:7688
+TEST_NEO4J_USER ?= neo4j
+TEST_NEO4J_PASSWORD ?= crimellm-test
+TEST_NEO4J_DATABASE ?= neo4j
 
 DATE ?= 2024-12-31
 LIMIT ?= 5000
@@ -19,7 +24,10 @@ help:
 	@echo "  ingest-cl-status    clg ingest courtlistener-status --date $$DATE"
 	@echo "  ingest-cl-index     clg ingest courtlistener-index  --date $$DATE"
 	@echo "  load-cl             clg load courtlistener --date $$DATE --limit $$LIMIT"
-	@echo "  test                pytest -q"
+	@echo "  test                pytest against the isolated test Neo4j (port 7688)"
+	@echo "  test-up             start the isolated test Neo4j container"
+	@echo "  test-down           stop + remove the test Neo4j container"
+	@echo "  test-logs           tail test Neo4j logs"
 	@echo "  lint                ruff check src/ tests/"
 	@echo "  format              ruff format src/ tests/"
 	@echo "  check               lint + format --check + test"
@@ -62,7 +70,20 @@ ingest-cl-index:
 load-cl:
 	uv run clg load courtlistener --date $(DATE) --limit $(LIMIT)
 
+test-up:
+	docker compose -f docker-compose.test.yml up -d
+
+test-down:
+	docker compose -f docker-compose.test.yml down
+
+test-logs:
+	docker compose -f docker-compose.test.yml logs -f neo4j-test
+
 test:
+	CRIMELLM_TEST_NEO4J_URI=$(TEST_NEO4J_URI) \
+	CRIMELLM_TEST_NEO4J_USER=$(TEST_NEO4J_USER) \
+	CRIMELLM_TEST_NEO4J_PASSWORD=$(TEST_NEO4J_PASSWORD) \
+	CRIMELLM_TEST_NEO4J_DATABASE=$(TEST_NEO4J_DATABASE) \
 	uv run pytest -q
 
 lint:
@@ -73,6 +94,10 @@ format:
 
 check: lint
 	uv run ruff format --check src/ tests/
+	CRIMELLM_TEST_NEO4J_URI=$(TEST_NEO4J_URI) \
+	CRIMELLM_TEST_NEO4J_USER=$(TEST_NEO4J_USER) \
+	CRIMELLM_TEST_NEO4J_PASSWORD=$(TEST_NEO4J_PASSWORD) \
+	CRIMELLM_TEST_NEO4J_DATABASE=$(TEST_NEO4J_DATABASE) \
 	uv run pytest -q
 
 clean-artifacts:
