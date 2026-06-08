@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<akomaNtoso xmlns="http://docs.oasis-open.org/legaldocml/ns/akn/3.0">
+  <act name="directive">
+    <meta>
+      <identification source="#pubofficeEU">
+        <FRBRWork>
+          <FRBRthis value="/akn/eu/act/directive/2019-05-20/2019-770"/>
+          <FRBRalias name="CELEX" value="32019L0770"/>
+          <FRBRalias name="ELI" value="eli/dir/2019/770"/>
+          <FRBRdate date="2019-05-20" name="adoption"/>
+          <FRBRnumber value="770"/>
+          <FRBRcountry value="eu"/>
+        </FRBRWork>
+        <FRBRExpression>
+          <FRBRlanguage language="eng"/>
+        </FRBRExpression>
+      </identification>
+    </meta>
+    <preface>
+      <docTitle>DIRECTIVE (EU) 2019/770 OF THE EUROPEAN PARLIAMENT AND OF THE COUNCIL of 20 May 2019 on certain aspects concerning contracts for the supply of digital content and digital services</docTitle>
+    </preface>
+    <preamble>
+      <p>Having regard to Directive 2011/83/EU (32011L0083) on consumer rights, which this Directive complements.</p>
+      <p>Coordination is also needed with Regulation (EU) 2016/679 (32016R0679) where personal data is processed as consideration.</p>
+      <authorialNote>
+        <p>See also Directive 32019L0771 on the sale of goods, the sibling instrument.</p>
+      </authorialNote>
+    </preamble>
+    <body>
+      <article eId="art_3">
+        <num>Article 3</num>
+        <heading>Scope</heading>
+        <paragraph eId="art_3__para_1">
+          <num>1.</num>
+          <content>
+            <p>This Directive shall apply to any contract where the trader supplies or undertakes to supply digital content or a digital service to the consumer.</p>
+          </content>
+        </paragraph>
+      </article>
+      <article eId="art_8">
+        <num>Article 8</num>
+        <heading>Conformity of the digital content or digital service</heading>
+        <paragraph eId="art_8__para_1">
+          <num>1.</num>
+          <content>
+            <p>The digital content or digital service shall conform to the contract.</p>
+          </content>
+        </paragraph>
+      </article>
+    </body>
+  </act>
+</akomaNtoso>

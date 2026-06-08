@@ -18,6 +18,7 @@ from crimellm.clg.parse import eurlex as P
 
 FIX = Path(__file__).parent / "fixtures" / "eurlex"
 GDPR_FILE = FIX / "32016R0679.en.fmx4.xml"
+DIRECTIVE_FILE = FIX / "32019L0770.en.fmx4.xml"
 JUDGMENT_FILE = FIX / "62012CJ0131.en.fmx4.xml"
 
 
@@ -79,6 +80,34 @@ def test_parse_regulation_extracts_implements_seeds():
     assert "32001R0045" in pr.cites_celex
     assert "32002L0058" in pr.cites_celex
     assert "32016R0679" not in pr.cites_celex
+
+
+# --- Phase 12: directive fixture rounds out EU coverage ------------------
+
+
+def test_parse_directive_metadata():
+    pr = P.parse_regulation_file(DIRECTIVE_FILE)
+    assert pr.instrument.id == "eu/celex/32019L0770"
+    assert pr.instrument.jurisdiction == "EU"
+    assert pr.instrument.year == 2019
+    assert "DIRECTIVE (EU) 2019/770" in pr.instrument.short_title
+
+
+def test_parse_directive_provisions():
+    pr = P.parse_regulation_file(DIRECTIVE_FILE)
+    paths = [p.section_path for p in pr.provisions]
+    assert paths == ["art.3", "art.8"]
+    art8 = next(p for p in pr.provisions if p.section_path == "art.8")
+    assert "Conformity" in art8.text
+
+
+def test_parse_directive_implements_seeds():
+    pr = P.parse_regulation_file(DIRECTIVE_FILE)
+    # Directive 2011/83 + GDPR + sibling 2019/771 cited, self-cite excluded.
+    assert "32011L0083" in pr.cites_celex
+    assert "32016R0679" in pr.cites_celex
+    assert "32019L0771" in pr.cites_celex
+    assert "32019L0770" not in pr.cites_celex
 
 
 def test_parse_regulation_explicit_celex_override():
