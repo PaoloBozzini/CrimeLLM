@@ -422,6 +422,29 @@ def eval_cmd(
         ),
     ] = None,
     synth_model: Annotated[str | None, typer.Option("--synth-model")] = None,
+    jurisdiction: Annotated[
+        str | None,
+        typer.Option(
+            "--jurisdiction",
+            "-j",
+            help=(
+                "CSV of jurisdictions to score (US|EW|UK|EU|DK). Add 'XJ' to "
+                "include cross-jurisdiction questions (jurisdiction: null). "
+                "'ALL' or '*' keeps every question. Default: all."
+            ),
+        ),
+    ] = None,
+    task_type: Annotated[
+        str | None,
+        typer.Option(
+            "--task-type",
+            help=(
+                "CSV of task types to score "
+                "(single_fact|multi_hop|as_of_date|good_law|no_fabrication). "
+                "Default: all."
+            ),
+        ),
+    ] = None,
     seed_k: Annotated[int, typer.Option("--seed-k")] = 8,
     top_k: Annotated[int, typer.Option("--top-k")] = 6,
     fmt: Annotated[
@@ -455,9 +478,24 @@ def eval_cmd(
     from ..eval import load_gold_set, run_eval, to_json, to_markdown
     from ..retrieval.synthesize import get_synthesizer
 
+    gold = load_gold_set(gold_set)
+
+    # Filter first — empty filters should fail fast without paying the
+    # cost of loading an embedder or synthesizer.
+    if jurisdiction:
+        codes = [c.strip() for c in jurisdiction.split(",") if c.strip()]
+        gold = gold.filter_by_jurisdiction(codes)
+    if task_type:
+        types = [t.strip() for t in task_type.split(",") if t.strip()]
+        gold = gold.filter_by_task_type(types)
+    if len(gold) == 0:
+        raise typer.BadParameter(
+            "no questions matched the requested filters "
+            f"(jurisdiction={jurisdiction!r}, task_type={task_type!r})"
+        )
+
     embedder = get_embedder(embedder_backend)
     synth = get_synthesizer(synthesizer, model=synth_model)
-    gold = load_gold_set(gold_set)
 
     report = run_eval(
         gold,

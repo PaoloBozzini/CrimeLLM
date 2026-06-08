@@ -1,14 +1,26 @@
 name: clg-seed
 description: |
-  Phase 6 seed gold set — 6 hand-authored questions covering the four task
-  types the brief calls out (single-fact, multi-hop, as-of-date, good-law)
-  + a no-fabrication probe. Designed to run end-to-end on the committed
-  fixtures from Phases 2-5; the live-graph subset works the moment those
-  fixtures are loaded into Neo4j.
-version: "1"
+  Phase 6 + Phase 10 seed gold set. Hand-authored questions covering
+  the four task types the brief calls out (single-fact, multi-hop,
+  as-of-date, good-law) + a no-fabrication probe, balanced across the
+  five active jurisdictions: US, UK, EU, DK, plus three cross-jurisdiction
+  questions that exercise the IMPLEMENTS edge (DK lbk → EU directive).
+
+  Questions use the fixture id conventions from Phases 2-5:
+    * US:    cl-cluster-<slug>
+    * UK:    uk/<type>/<year>/<num>/section/<sec>@<version>
+    * EU:    eu/celex/<CELEX>/article/art.<N>
+    * DK:    dk/<doc_type>/<year>/<num>/section/§<N>[/stk.M][/nr.K]
+    * Cases: ECLI:DK:..., ECLI:EU:C:..., or cl-cluster-<slug>
+
+  Filter at runtime via `clg eval --jurisdiction DK,EU` or
+  `clg eval --task-type good_law`.
+version: "2"
 
 questions:
-  # --- US — good law (Plessy → Brown) ---
+  # =====================================================================
+  # US — common-law good-law (Plessy → Brown)
+  # =====================================================================
   - id: us-good-law-plessy
     question: "Is Plessy v. Ferguson still good law?"
     task_type: good_law
@@ -24,54 +36,6 @@ questions:
       Requires Phase 5 to have populated treatment=overruled on the
       Brown→Plessy CITES edge.
 
-  # --- UK — single-fact lookup, current Provision ---
-  - id: uk-single-fact-fraud-penalty-current
-    question: "Maximum sentence on indictment for fraud under the Fraud Act 2006 (current law)."
-    task_type: single_fact
-    jurisdiction: UK
-    as_of: 2024-06-01
-    expected_authorities:
-      - uk/ukpga/2006/35/section/3@current
-    tags: [statute, single-fact]
-
-  # --- UK — as-of-date filtering ---
-  - id: uk-as-of-fraud-penalty-2010
-    question: "Maximum sentence on indictment for fraud under the Fraud Act 2006 (as of 2010-06-01)."
-    task_type: as_of_date
-    jurisdiction: UK
-    as_of: 2010-06-01
-    expected_authorities:
-      - uk/ukpga/2006/35/section/3@enacted
-    tags: [statute, as-of-date]
-    notes: |
-      Same question, different date → must return the enacted (7-year)
-      version, NOT the current (10-year) version.
-
-  # --- UK — multi-hop: judgment → interpreted provisions ---
-  - id: uk-multi-hop-r-v-smith-2015
-    question: "Which sections of the Fraud Act 2006 did R v Smith [2015] EWCA Crim 12345 interpret?"
-    task_type: multi_hop
-    jurisdiction: UK
-    as_of: 2024-06-01
-    expected_authorities:
-      - uk/ukpga/2006/35/section/2@enacted
-      - uk/ukpga/2006/35/section/3@enacted
-    tags: [multi-hop, judgment-to-statute]
-
-  # --- UK — fabrication probe ---
-  - id: uk-no-fabrication-irrelevant
-    question: "What did the Fraud Act 2006 say about quantum computing intellectual property?"
-    task_type: no_fabrication
-    jurisdiction: UK
-    as_of: 2024-06-01
-    expected_authorities: []
-    tags: [adversarial, no-fabrication]
-    notes: |
-      Out-of-scope question — the right answer is "the context does not
-      address this". Citation accuracy = 100% only if no fabricated
-      authority appears in the response.
-
-  # --- Cross-jurisdiction inference (no explicit cue) ---
   - id: us-good-law-named-overruler
     question: "Was Plessy v. Ferguson overruled, and if so by which case?"
     task_type: good_law
@@ -87,3 +51,277 @@ questions:
     notes: |
       Stronger version of us-good-law-plessy — requires the answer text to
       mention Brown v. Board by stable identifier, not just the caveat.
+
+  # =====================================================================
+  # UK — point-in-time legislation
+  # =====================================================================
+  - id: uk-single-fact-fraud-penalty-current
+    question: "Maximum sentence on indictment for fraud under the Fraud Act 2006 (current law)."
+    task_type: single_fact
+    jurisdiction: UK
+    as_of: 2024-06-01
+    expected_authorities:
+      - uk/ukpga/2006/35/section/3@current
+    tags: [statute, single-fact]
+
+  - id: uk-as-of-fraud-penalty-2010
+    question: "Maximum sentence on indictment for fraud under the Fraud Act 2006 (as of 2010-06-01)."
+    task_type: as_of_date
+    jurisdiction: UK
+    as_of: 2010-06-01
+    expected_authorities:
+      - uk/ukpga/2006/35/section/3@enacted
+    tags: [statute, as-of-date]
+    notes: |
+      Same question, different date → must return the enacted (7-year)
+      version, NOT the current (10-year) version.
+
+  - id: uk-multi-hop-r-v-smith-2015
+    question: "Which sections of the Fraud Act 2006 did R v Smith [2015] EWCA Crim 12345 interpret?"
+    task_type: multi_hop
+    jurisdiction: UK
+    as_of: 2024-06-01
+    expected_authorities:
+      - uk/ukpga/2006/35/section/2@enacted
+      - uk/ukpga/2006/35/section/3@enacted
+    tags: [multi-hop, judgment-to-statute]
+
+  - id: uk-no-fabrication-irrelevant
+    question: "What did the Fraud Act 2006 say about quantum computing intellectual property?"
+    task_type: no_fabrication
+    jurisdiction: UK
+    as_of: 2024-06-01
+    expected_authorities: []
+    tags: [adversarial, no-fabrication]
+    notes: |
+      Out-of-scope question — the right answer is "the context does not
+      address this". Citation accuracy = 100% only if no fabricated
+      authority appears in the response.
+
+  # =====================================================================
+  # EU — CELEX-keyed regulations / directives + CJEU case law
+  # =====================================================================
+  - id: eu-single-fact-gdpr-art-6
+    question: "What are the lawful bases for processing personal data under GDPR Article 6?"
+    task_type: single_fact
+    jurisdiction: EU
+    as_of: 2024-06-01
+    expected_authorities:
+      - eu/celex/32016R0679/article/art.6
+    tags: [statute, single-fact, gdpr]
+
+  - id: eu-single-fact-tfeu-art-101
+    question: "What does Article 101 TFEU prohibit?"
+    task_type: single_fact
+    jurisdiction: EU
+    as_of: 2024-06-01
+    expected_authorities:
+      - eu/treaty/tfeu/article/101
+    tags: [treaty, single-fact, competition]
+
+  - id: eu-multi-hop-google-spain
+    question: "Which GDPR / directive provisions did Google Spain (ECLI:EU:C:2014:317) interpret?"
+    task_type: multi_hop
+    jurisdiction: EU
+    as_of: 2024-06-01
+    expected_authorities:
+      - ECLI:EU:C:2014:317
+      - eu/celex/31995L0046/article/art.12
+    tags: [multi-hop, cjeu, judgment-to-statute]
+    notes: |
+      Google Spain interpreted Directive 95/46 art. 12 (right to erasure,
+      since carried into GDPR art. 17). Tests INTERPRETS edge across an
+      EU case → EU directive provision.
+
+  - id: eu-good-law-keck-vs-dassonville
+    question: "Did the CJEU depart from Dassonville in Keck Mithouard?"
+    task_type: good_law
+    jurisdiction: EU
+    as_of: 2024-06-01
+    expected_authorities:
+      - ECLI:EU:C:1993:905
+      - ECLI:EU:C:1974:82
+    expected_good_law:
+      ECLI:EU:C:1974:82: departed_from
+    expected_treating_case: ECLI:EU:C:1993:905
+    tags: [cjeu, departed-from, landmark]
+    notes: |
+      Civil-law equivalent of Plessy→Brown. CJEU explicitly departed from
+      Dassonville's broad measures-having-equivalent-effect doctrine in
+      Keck for non-discriminatory selling arrangements.
+
+  - id: eu-no-fabrication-irrelevant
+    question: "What does GDPR say about cryptocurrency mining hardware tax depreciation?"
+    task_type: no_fabrication
+    jurisdiction: EU
+    as_of: 2024-06-01
+    expected_authorities: []
+    tags: [adversarial, no-fabrication]
+
+  # =====================================================================
+  # DK — civil-law statute + Højesteret + sub-statute granularity
+  # =====================================================================
+  - id: dk-single-fact-databeskyttelse-art-6
+    question: "Hvad regulerer databeskyttelseslovens § 6 stk. 1?"
+    task_type: single_fact
+    jurisdiction: DK
+    as_of: 2024-06-01
+    expected_authorities:
+      - dk/lbk/2018/502/section/§6/stk.1
+    tags: [statute, single-fact, gdpr-da]
+    notes: |
+      DK lbk lookup — supplerer GDPR. Tests Phase 4 explode_subparagraphs
+      mode (per-stk Provision granularity).
+
+  - id: dk-single-fact-aftaleloven-§-36
+    question: "What is the general rule of fairness in Danish contract law?"
+    task_type: single_fact
+    jurisdiction: DK
+    as_of: 2024-06-01
+    expected_authorities:
+      - dk/lbk/1985/600/section/§36
+    tags: [statute, single-fact, contract-law]
+    notes: |
+      Question in EN, answer expected in EN (jurisdiction-only DK).
+      Aftaleloven § 36 — generalklausul om urimelighed.
+
+  - id: dk-single-fact-straffeloven-§-279
+    question: "Beskriv gerningsindholdet i straffelovens § 279 om bedrageri."
+    task_type: single_fact
+    jurisdiction: DK
+    as_of: 2024-06-01
+    expected_authorities:
+      - dk/lbk/2024/434/section/§279
+    tags: [statute, single-fact, criminal-law]
+
+  - id: dk-as-of-databeskyttelse-pre-gdpr
+    question: "Hvad var den danske persondatabeskyttelse før GDPR (som af 2017-06-01)?"
+    task_type: as_of_date
+    jurisdiction: DK
+    as_of: 2017-06-01
+    expected_authorities:
+      - dk/lov/2000/429/section/§5
+    tags: [statute, as-of-date, persondataloven]
+    notes: |
+      Pre-GDPR persondataloven 2000/429 should win over the post-GDPR
+      databeskyttelsesloven 2018/502 for an as-of 2017 query. Tests
+      Phase 4 valid_from semantics on DK consolidations.
+
+  - id: dk-multi-hop-hr-2023-aftaleloven
+    question: "Hvilken bestemmelse i aftaleloven anvendte Højesteret i U.2023.1234H?"
+    task_type: multi_hop
+    jurisdiction: DK
+    as_of: 2024-06-01
+    expected_authorities:
+      - ECLI:DK:HR:2023:1234
+      - dk/lbk/1985/600/section/§36
+    tags: [multi-hop, hr, judgment-to-statute]
+    notes: |
+      Tests INTERPRETS edge: DK Højesteret case → DK statute Provision.
+      Fixture u-2023-1234-h cites aftalelovens § 36 in the body.
+
+  - id: dk-good-law-fraveget
+    question: "Er U.2010.456H stadig udtryk for gældende ret?"
+    task_type: good_law
+    jurisdiction: DK
+    as_of: 2024-06-01
+    expected_authorities:
+      - U.2010.456.H
+    expected_good_law:
+      U.2010.456.H: departed_from
+    expected_treating_case: ECLI:DK:HR:2023:1234
+    tags: [good-law, hr, departed-from]
+    notes: |
+      DK reframes "still good law" as "stadig udtryk for gældende ret /
+      fast praksis". The treatment label is ``departed_from``, NOT
+      ``overruled`` — civil-law convention from Phase 0 / Phase 6.
+
+  - id: dk-good-law-kritiseret
+    question: "Har Højesteret kritiseret afgørelsen i U.2020.789V?"
+    task_type: good_law
+    jurisdiction: DK
+    as_of: 2024-06-01
+    expected_authorities:
+      - U.2020.789.V
+    expected_good_law:
+      U.2020.789.V: criticised
+    tags: [good-law, hr, criticised]
+
+  - id: dk-sub-statute-databeskyttelse-§6-nr1
+    question: "Hvilke betingelser fastsætter databeskyttelseslovens § 6 stk. 1 nr. 1?"
+    task_type: single_fact
+    jurisdiction: DK
+    as_of: 2024-06-01
+    expected_authorities:
+      - dk/lbk/2018/502/section/§6/stk.1/nr.1
+    tags: [statute, single-fact, sub-statute]
+    notes: |
+      Tests Phase 4 sub-statute granularity (§ N stk. M nr. K). The
+      expected Provision id mirrors what parse/retsinformation.py emits
+      in explode_subparagraphs mode.
+
+  - id: dk-no-fabrication-irrelevant
+    question: "Hvad siger straffeloven om kvantecomputerkriminalitet?"
+    task_type: no_fabrication
+    jurisdiction: DK
+    as_of: 2024-06-01
+    expected_authorities: []
+    tags: [adversarial, no-fabrication, da]
+
+  - id: dk-no-fabrication-en-query-da-corpus
+    question: "What does the Danish penal code say about quantum-computer crimes?"
+    task_type: no_fabrication
+    jurisdiction: DK
+    as_of: 2024-06-01
+    expected_authorities: []
+    tags: [adversarial, no-fabrication, cross-lang]
+    notes: |
+      EN query about a DA-only topic. Phase 8 lang detector should still
+      route to EN synthesis; no-fabrication invariant must hold either way.
+
+  # =====================================================================
+  # Cross-jurisdiction — IMPLEMENTS edge (DK lbk → EU directive)
+  # =====================================================================
+  - id: xj-implements-databeskyttelsesloven-gdpr
+    question: "Hvilken EU-forordning gennemføres af databeskyttelsesloven?"
+    task_type: multi_hop
+    jurisdiction: null
+    as_of: 2024-06-01
+    expected_authorities:
+      - dk/lbk/2018/502
+      - eu/celex/32016R0679
+    tags: [cross-jurisdiction, implements, gdpr]
+    notes: |
+      Pure IMPLEMENTS-edge traversal: DK Instrument → EU Instrument. The
+      Phase 4 preamble extractor seeded this edge from
+      "forordning (EU) 2016/679" in the lbk preamble.
+
+  - id: xj-implements-led
+    question: "Which Danish acts implement the Law Enforcement Directive 2016/680?"
+    task_type: multi_hop
+    jurisdiction: null
+    as_of: 2024-06-01
+    expected_authorities:
+      - dk/lbk/2018/502
+      - eu/celex/32016L0680
+    tags: [cross-jurisdiction, implements, led]
+    notes: |
+      Bilingual query (EN) over cross-jurisdiction graph. Tests that
+      retrieval surfaces both endpoints of the IMPLEMENTS edge regardless
+      of which side the question phrases first.
+
+  - id: xj-multi-hop-google-spain-da-implementation
+    question: "Hvordan blev Google Spain-doktrinen om retten til at blive glemt implementeret i dansk ret?"
+    task_type: multi_hop
+    jurisdiction: null
+    as_of: 2024-06-01
+    expected_authorities:
+      - ECLI:EU:C:2014:317
+      - eu/celex/32016R0679/article/art.17
+      - dk/lbk/2018/502/section/§5
+    tags: [cross-jurisdiction, multi-hop, gdpr, right-to-erasure]
+    notes: |
+      Three-hop traversal: CJEU case → EU regulation Provision (Art. 17
+      right to erasure carries the Google Spain doctrine) → DK lbk
+      Provision (national implementation). Exercises CITES + IMPLEMENTS
+      + INTERPRETS in a single question.

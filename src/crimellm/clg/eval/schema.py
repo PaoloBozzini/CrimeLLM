@@ -76,6 +76,52 @@ class GoldSet:
     def __len__(self) -> int:
         return len(self.questions)
 
+    def filter_by_jurisdiction(self, codes: list[str]) -> GoldSet:
+        """Return a new ``GoldSet`` keeping only questions whose
+        ``jurisdiction`` is in ``codes`` (case-insensitive).
+
+        Cross-jurisdiction questions (``jurisdiction: null``) are
+        included when ``codes`` contains the literal ``"XJ"`` token or
+        when the caller explicitly listed any of the special tokens
+        ``"ALL"`` / ``"*"`` / ``"NULL"`` — that way an operator can
+        ``clg eval --jurisdiction DK,XJ`` to score DK questions plus
+        cross-jurisdiction IMPLEMENTS-edge probes side-by-side.
+        """
+        wanted = {c.strip().upper() for c in codes if c.strip()}
+        include_null = bool(wanted & {"XJ", "NULL", "ALL", "*"})
+        if "ALL" in wanted or "*" in wanted:
+            return self
+        kept = [
+            q
+            for q in self.questions
+            if (q.jurisdiction is None and include_null)
+            or (q.jurisdiction is not None and q.jurisdiction.upper() in wanted)
+        ]
+        return GoldSet(
+            name=self.name,
+            description=self.description,
+            questions=kept,
+            version=self.version,
+        )
+
+    def filter_by_task_type(self, task_types: list[str]) -> GoldSet:
+        """Return a new ``GoldSet`` keeping only the listed task types."""
+        wanted = {t.strip().lower() for t in task_types if t.strip()}
+        kept = [q for q in self.questions if q.task_type.lower() in wanted]
+        return GoldSet(
+            name=self.name,
+            description=self.description,
+            questions=kept,
+            version=self.version,
+        )
+
+    def jurisdictions(self) -> list[str]:
+        """Distinct jurisdiction codes present (``"XJ"`` for cross-juris)."""
+        out: set[str] = set()
+        for q in self.questions:
+            out.add(q.jurisdiction if q.jurisdiction is not None else "XJ")
+        return sorted(out)
+
 
 def _to_date(value: object) -> date | None:
     if value is None or value == "":
