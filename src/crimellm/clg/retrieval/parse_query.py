@@ -12,10 +12,10 @@ Three knobs come out:
 * ``as_of`` — defaults to today (UTC). An explicit ISO date anywhere in the
   prompt ("as of 2018-05-12") overrides. CLI ``--as-of`` always wins.
 * ``language`` — ISO 639-1 of the question body. Drives synthesis prompt
-  language (Phase 8). Multi-signal detector: DA-only diacritics (æ/ø/å),
-  stopword frequency, character bigrams, and Danish word-ending suffixes
-  combine into a weighted score. Defaults to ``"en"`` when undetermined
-  — Claude handles EN > DA, so EN is the safer fallback.
+  language (Phase 8). Detection lives in :mod:`crimellm.common.language`
+  (multi-signal: diacritics + stopwords + bigrams + suffixes). Defaults
+  to ``"en"`` when undetermined — Claude handles EN > DA, so EN is the
+  safer fallback.
 
 We *don't* extract entities here — that's the job of seed + expand. Parsing
 stays small so it can be reasoned about + tested cheaply.

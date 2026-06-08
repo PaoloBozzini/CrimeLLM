@@ -45,20 +45,20 @@ DA_ONLY_CHARS = frozenset("æøåÆØÅ")
 # "I" and Danish "i") gets dropped from at least one list.
 DA_STOPWORDS: frozenset[str] = frozenset(
     [
-        "og", "at", "der", "som", "med", "for", "den", "det", "en", "et",
+        "og", "at", "der", "som", "med", "den", "det", "en", "et",
         "af", "på", "til", "har", "ikke", "var", "fra", "være", "om", "men",
-        "han", "hun", "vi", "kan", "skal", "vil", "blev", "også", "her",
+        "han", "hun", "vi", "kan", "skal", "vil", "blev", "også",
         "ved", "eller", "sig", "så", "havde", "kunne", "skulle", "ville",
         "efter", "under", "før", "mod", "uden",
     ]
 )
 EN_STOPWORDS: frozenset[str] = frozenset(
     [
-        "the", "of", "and", "to", "is", "it", "that", "was", "for",
+        "the", "of", "and", "to", "is", "it", "that", "was",
         "on", "with", "as", "be", "by", "are", "this", "from", "not", "or",
         "an", "have", "has", "but", "what", "all", "we", "can", "do", "does",
         "would", "could", "should", "which", "when", "where", "how", "who",
-        "their", "his", "her", "they",
+        "their", "his", "they",
     ]
 )
 
