@@ -1,27 +1,30 @@
 """Retsinformation — accn-based ingester via the official API.
 
-Two endpoints:
+Three endpoints:
 
 1. **Discovery / harvest** — ``https://api.retsinformation.dk/v1/Documents?date=YYYY-MM-DD``
    returns a JSON delta feed (changed-in-window) of ``Document`` records with
    ``accessionsnummer``, ``documentType.shortName``, ``href``, etc. Window
    is "last 10 days" per the published swagger; the API enforces it strictly.
 
-2. **Per-document XML** — each Document carries
+2. **Slash-form → accession-number resolver** —
+   ``https://www.retsinformation.dk/eli/lta/<year>/<num>.rdfa`` returns the
+   SPA shell wrapped with RDFa metadata that embeds the accn (and only that
+   embedding tells us the accn for any given citable slash-form ELI).
+   ``resolve_accn(year, num)`` does the lookup. The ``lta`` (Lovtidende A)
+   pub-media covers LOV, LBK, and BEK; the conventional ``lov`` / ``lbk``
+   / ``bek`` slash-forms don't return useful RDFa.
+
+3. **Per-document XML** — each Document carries
    ``href = "http://retsinformation.dk/eli/accn/<ACCN>/xml"`` pointing at
    the structured **LexDania** XML body.
 
-Operator workflow (Phase 14.5):
+Operator workflow:
 
-  a. *Discover* a set of `Document` records via ``--since`` (harvest)
-     or by hand (browse the SPA and copy the accession number from the URL).
-  b. *Ingest* the chosen accns via ``--items A20180050229,B20260050805``.
-
-The accession number is the API's stable identifier; the slash-form
-``lbk/2018/502`` is the *citable* identifier but not directly mappable
-to an accn (it's a publication-date-encoded internal id). Resolver
-deferred to a future phase that mirrors the full Retsinformation
-catalog via the daily harvest feed.
+  a. *Discover* recent changes via ``--discover [--since YYYY-MM-DD]``, or
+     *resolve* a citable slash-form via ``--resolve lov/2018/502``, or just
+     paste a slash-form into ``--items`` (resolver runs transparently).
+  b. *Ingest* the chosen accns/slash-forms via ``--items <CSV>``.
 
 Open data, free reuse with attribution (Civilstyrelsen). Polite +
 resumable.
@@ -30,6 +33,7 @@ resumable.
 from __future__ import annotations
 
 import json as _json
+import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +70,120 @@ def discover_url(date_iso: str | None = None) -> str:
 def accn_cache_path(accn: str, dest_dir: Path) -> Path:
     """Stable on-disk filename keyed by accession number."""
     return dest_dir / f"{accn.strip()}.xml"
+
+
+def rdfa_url(year: int, num: int, *, pub_media: str = "lta") -> str:
+    """RDFa resolver URL for ``year/num`` under a publication-media class.
+
+    ``lta`` (Lovtidende A) covers LOV, LBK, and BEK. ``ltc`` (Lovtidende C)
+    is rarely needed. The conventional ``lov`` / ``lbk`` / ``bek`` slugs
+    don't return useful RDFa — Retsinformation only embeds the accn for
+    the publication-media routing path.
+    """
+    return f"https://www.retsinformation.dk/eli/{pub_media}/{year}/{num}.rdfa"
+
+
+# An accession number is the literal id Retsinformation's XML uses.
+# Format: <prefix><year><7 digits>, prefix ∈ {A, B, C, D}.
+_ACCN_RE = re.compile(r"^[ABCD]20\d{9}$")
+_SLASH_RE = re.compile(r"^(?P<doc>[a-z]+)/(?P<year>\d{4})/(?P<num>\d+)$")
+_RDFA_ACCN_RE = re.compile(rb'"([ABCD]20\d{9})"')
+
+
+def is_accn(value: str) -> bool:
+    return bool(_ACCN_RE.match(value.strip()))
+
+
+def is_slash_form(value: str) -> bool:
+    return bool(_SLASH_RE.match(value.strip()))
+
+
+def resolve_accn(
+    year: int,
+    num: int,
+    *,
+    pub_media: str = "lta",
+    client: httpx.Client | None = None,
+) -> str | None:
+    """Look up the accession number for a slash-form ELI.
+
+    Fetches ``rdfa_url(year, num, pub_media=...)`` and pulls the first
+    ``"A20XXXXXXXXX"`` / ``"B…"`` / ``"C…"`` literal out of the RDFa
+    payload. Returns ``None`` when the slug isn't recognised (the SPA
+    returns its 2.8 KB shell with no embedded RDFa).
+    """
+    url = rdfa_url(year, num, pub_media=pub_media)
+    owns_client = client is None
+    if client is None:
+        client = httpx.Client(headers=UA, timeout=30.0, follow_redirects=True)
+    try:
+        try:
+            r = get_with_retry(client, url)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+        # Empty RDFa shell ≈ 2.8 KB; real RDFa payload is ≥ ~5 KB. Bail
+        # early so we don't false-positive on `<meta property="og:..."` etc.
+        if len(r.content) < 4_000:
+            return None
+        m = _RDFA_ACCN_RE.search(r.content)
+        return m.group(1).decode("ascii") if m else None
+    finally:
+        if owns_client:
+            client.close()
+
+
+def normalise_items(
+    items: Iterable[str],
+    *,
+    pub_media: str = "lta",
+    client: httpx.Client | None = None,
+) -> list[tuple[str, tuple[str, int, int] | None]]:
+    """Map a mixed list of accn / slash-form entries to ``(accn, triple_or_None)``.
+
+    * ``"A20180050230"`` → ``("A20180050230", None)``.
+    * ``"lov/2018/502"`` → looks up the accn via ``resolve_accn`` →
+      ``("A20180050230", ("lov", 2018, 502))``.
+
+    Slash-form entries that fail to resolve raise ``ValueError`` so the
+    operator knows which entry is the problem; the alternative (silent
+    skip) hides typos that look like working downloads.
+    """
+    out: list[tuple[str, tuple[str, int, int] | None]] = []
+    owns_client = client is None
+    if client is None:
+        client = httpx.Client(headers=UA, timeout=30.0, follow_redirects=True)
+    try:
+        for raw in items:
+            entry = raw.strip()
+            if not entry:
+                continue
+            if is_accn(entry):
+                out.append((entry, None))
+                continue
+            m = _SLASH_RE.match(entry)
+            if not m:
+                raise ValueError(
+                    f"unrecognised --items entry {entry!r}: "
+                    "expected accn (e.g. A20180050230) or slash-form "
+                    "(e.g. lov/2018/502)"
+                )
+            doc_type = m["doc"]
+            year = int(m["year"])
+            num = int(m["num"])
+            accn = resolve_accn(year, num, pub_media=pub_media, client=client)
+            if accn is None:
+                raise ValueError(
+                    f"could not resolve {entry!r} to an accession number via "
+                    f"{rdfa_url(year, num, pub_media=pub_media)} — does the "
+                    "document exist? Try --discover or browse the SPA."
+                )
+            out.append((accn, (doc_type, year, num)))
+    finally:
+        if owns_client:
+            client.close()
+    return out
 
 
 # --- low-level fetch ------------------------------------------------------

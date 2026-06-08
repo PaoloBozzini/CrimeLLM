@@ -198,10 +198,10 @@ def retsinformation(
         str | None,
         typer.Option(
             "--items",
-            help="CSV of accession numbers, e.g. 'A20180050229,B20260050805'. "
-            "Find an accn by browsing https://www.retsinformation.dk/ and "
-            "copying the value shown in the SPA URL or 'Download → XML' menu, "
-            "or by running --discover.",
+            help="CSV of accession numbers (e.g. 'A20180050230') OR "
+            "citable slash-form ELIs (e.g. 'lov/2018/502'). Slash-form "
+            "entries are resolved to accns transparently via the RDFa "
+            "endpoint. Mix freely: '--items lov/2018/502,B20260050805'.",
         ),
     ] = None,
     discover: Annotated[
@@ -221,15 +221,25 @@ def retsinformation(
             "the last 10 days per the API contract.",
         ),
     ] = None,
+    resolve: Annotated[
+        str | None,
+        typer.Option(
+            "--resolve",
+            help="CSV of citable slash-form ELIs (e.g. 'lov/2018/502,lbk/2024/434'). "
+            "Print the accession number for each and exit. No download.",
+        ),
+    ] = None,
 ) -> None:
     """Download Danish primary law from retsinformation.dk via the harvest API.
 
-    Two modes:
+    Three modes:
 
       * ``--discover [--since YYYY-MM-DD]`` — print the daily-delta JSON
         feed so the operator can identify accession numbers.
-      * ``--items A20180050229,B20260050805`` — download each accn's
-        LexDania XML to ``data/raw/retsinformation/<accn>.xml``.
+      * ``--resolve lov/2018/502,lbk/2024/434`` — print the accn for each
+        slash-form ELI without downloading.
+      * ``--items <CSV>`` — download each entry's LexDania XML to
+        ``data/raw/retsinformation/<accn>.xml``. Mix accns and slash-forms.
     """
     s = get_settings()
     if not s.is_enabled("DK"):
@@ -237,7 +247,11 @@ def retsinformation(
             f"'DK' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
         )
     from ..ingest._base import IngestContext
-    from ..ingest.retsinformation import RetsinformationSource, discover_all
+    from ..ingest.retsinformation import (
+        RetsinformationSource,
+        discover_all,
+        normalise_items,
+    )
 
     if discover:
         feed = discover_all(date_iso=since)
@@ -260,14 +274,49 @@ def retsinformation(
         )
         return
 
+    if resolve:
+        entries = [r.strip() for r in resolve.split(",") if r.strip()]
+        try:
+            resolved = normalise_items(entries)
+        except ValueError as e:
+            raise typer.BadParameter(str(e))
+        typer.echo(
+            json.dumps(
+                [
+                    {
+                        "slash_form": (
+                            f"{triple[0]}/{triple[1]}/{triple[2]}"
+                            if triple
+                            else None
+                        ),
+                        "accn": accn,
+                    }
+                    for accn, triple in resolved
+                ],
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
+
     if not items:
         raise typer.BadParameter(
-            "pass --items <CSV of accession numbers> (e.g. 'A20180050229') "
-            "or --discover to find them via the daily-delta feed"
+            "pass --items <CSV of accns or slash-forms> "
+            "(e.g. 'lov/2018/502,A20180050230'), "
+            "or --discover to harvest the daily-delta feed, "
+            "or --resolve <slash-forms> to look up accns without downloading"
         )
 
-    accns = tuple(a.strip() for a in items.split(",") if a.strip())
-    src = RetsinformationSource(accns=accns)
+    entries = [a.strip() for a in items.split(",") if a.strip()]
+    try:
+        normalised = normalise_items(entries)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
+    accns = tuple(accn for accn, _ in normalised)
+    slash_form_map = {accn: triple for accn, triple in normalised if triple is not None}
+
+    src = RetsinformationSource(accns=accns, slash_form_map=slash_form_map)
     paths = src.download(IngestContext())
     typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
 
