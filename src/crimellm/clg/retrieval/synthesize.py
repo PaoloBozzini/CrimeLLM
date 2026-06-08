@@ -30,13 +30,19 @@ from dataclasses import dataclass, field
 
 from .good_law import GoodLawFlag, summary_label
 from .parse_query import Query
+from .prompts import (
+    DISCLAIMER_EN,
+    disclaimer_for,
+    format_candidates_block,
+    no_context_message_for,
+    system_prompt_for,
+)
 from .seed import Candidate
 
-DISCLAIMER = (
-    "This is research support, not legal advice. Every statement is grounded "
-    "in the retrieved authorities; consult a qualified lawyer for advice on "
-    "any specific matter."
-)
+# Back-compat alias — the EN disclaimer is still the most-common default
+# and external code that imported ``DISCLAIMER`` from this module shouldn't
+# break. New callers should use ``disclaimer_for(query.language)``.
+DISCLAIMER = DISCLAIMER_EN
 
 
 @dataclass(slots=True)
@@ -73,25 +79,19 @@ class Answer:
 # --- helpers shared by both backends ---------------------------------------
 
 
-def _context_block(candidates: Sequence[Candidate]) -> str:
+def _context_block(candidates: Sequence[Candidate], *, language: str = "en") -> str:
     """Serialise the reranked candidates for the prompt.
 
     Identifiers in brackets are the ONLY citations the model is allowed to
     emit. The synthesizer prompt makes that rule explicit; the caller
     enforces it after the fact via ``check_citations``.
+
+    Headings are enriched per jurisdiction via
+    ``prompts.format_human_citation`` so DK lbk ids render as
+    ``Aftaleloven § 36`` and EU CELEX renders as ``Reg (EU) 2016/679,
+    Art. 6`` — without changing the bracketed canonical id.
     """
-    lines: list[str] = []
-    for i, c in enumerate(candidates, 1):
-        head = f"[{c.parent_id}]"
-        if c.parent_type == "Case" and c.parent_name:
-            head = f"{c.parent_name} {head}"
-        elif c.parent_type == "Provision" and c.section_path:
-            head = f"{c.parent_id} ({c.section_path}, version={c.version_id or 'n/a'})"
-        body = c.text.strip()
-        if len(body) > 1500:
-            body = body[:1500].rstrip() + "…"
-        lines.append(f"#{i} {head}\n{body}".strip())
-    return "\n\n---\n\n".join(lines)
+    return format_candidates_block(candidates, language=language)
 
 
 def _allowed_identifiers(candidates: Sequence[Candidate]) -> set[str]:
@@ -146,8 +146,7 @@ def _empty_answer(query: Query, model: str) -> Answer:
     return Answer(
         question=query.raw,
         text=(
-            DISCLAIMER + "\n\nNo authorities matched the query. Retrieved context is empty; "
-            "I won't speculate."
+            disclaimer_for(query.language) + "\n\n" + no_context_message_for(query.language)
         ),
         citations=[],
         caveats=[],
@@ -156,20 +155,60 @@ def _empty_answer(query: Query, model: str) -> Answer:
     )
 
 
+_USER_PROMPT_LABELS: dict[str, dict[str, str]] = {
+    "en": {
+        "question": "Question",
+        "jurisdiction": "Jurisdiction",
+        "as_of": "As-of date",
+        "unspecified": "unspecified",
+        "caveats_header": "Caveats (must surface verbatim)",
+        "none": "(none)",
+        "context": "Context",
+    },
+    "da": {
+        "question": "Spørgsmål",
+        "jurisdiction": "Jurisdiktion",
+        "as_of": "As-of dato",
+        "unspecified": "uspecificeret",
+        "caveats_header": "Forbehold (skal gengives ordret)",
+        "none": "(ingen)",
+        "context": "Context",
+    },
+}
+
+
 def _build_user_prompt(
     query: Query,
     candidates: Sequence[Candidate],
     caveats: list[str],
 ) -> str:
-    """Standard user-message body shared by every LLM-backed synthesizer."""
-    return (
-        f"Question: {query.raw}\n"
-        f"Jurisdiction: {query.jurisdiction or 'unspecified'}\n"
-        f"As-of date: {query.as_of.isoformat()}\n\n"
-        f"Caveats (must surface verbatim):\n"
-        + ("\n".join(f"- {x}" for x in caveats) if caveats else "- (none)")
-        + f"\n\nContext:\n{_context_block(candidates)}"
+    """Standard user-message body shared by every LLM-backed synthesizer.
+
+    Labels are localised to ``query.language``; ``"Context"`` stays in EN
+    so the system prompt's strict-rules reference (which always names the
+    ``Context`` block) matches regardless of caller language.
+    """
+    labels = _USER_PROMPT_LABELS.get(
+        (query.language or "en").lower(), _USER_PROMPT_LABELS["en"]
     )
+    return (
+        f"{labels['question']}: {query.raw}\n"
+        f"{labels['jurisdiction']}: {query.jurisdiction or labels['unspecified']}\n"
+        f"{labels['as_of']}: {query.as_of.isoformat()}\n\n"
+        f"{labels['caveats_header']}:\n"
+        + (
+            "\n".join(f"- {x}" for x in caveats)
+            if caveats
+            else f"- {labels['none']}"
+        )
+        + f"\n\n{labels['context']}:\n{_context_block(candidates, language=query.language)}"
+    )
+
+
+_FABRICATION_NOTE: dict[str, str] = {
+    "en": "WARNING — model emitted citations not present in retrieved context: ",
+    "da": "ADVARSEL — modellen genererede citater, som ikke findes i den hentede kontekst: ",
+}
 
 
 def _finalise_answer(
@@ -185,19 +224,18 @@ def _finalise_answer(
     All LLM backends route through here so the "no fabricated citations"
     contract is enforced uniformly: extract every ``[id]`` from the model's
     output, split into valid vs not-in-context, and surface fabrications as a
-    visible caveat.
+    visible caveat. Disclaimer + fabrication note are language-routed.
     """
     allowed = _allowed_identifiers(candidates)
     valid, fabricated = check_citations(model_text, allowed)
+    lang = (query.language or "en").lower()
     if fabricated:
-        caveats.append(
-            "WARNING — model emitted citations not present in retrieved context: "
-            + ", ".join(fabricated)
-        )
+        prefix = _FABRICATION_NOTE.get(lang, _FABRICATION_NOTE["en"])
+        caveats.append(prefix + ", ".join(fabricated))
     body = (model_text or "").strip()
     return Answer(
         question=query.raw,
-        text=DISCLAIMER + "\n\n" + body,
+        text=disclaimer_for(lang) + "\n\n" + body,
         citations=valid,
         caveats=caveats,
         used_candidates=list(candidates),
@@ -224,20 +262,10 @@ class Synthesizer(ABC):
 # --- Anthropic Claude ------------------------------------------------------
 
 
-_SYSTEM_PROMPT = """You are a research assistant for primary-law questions.
-
-Strict rules:
-1. Use ONLY the passages provided under "Context" below as evidence.
-2. Cite every factual claim by the bracketed identifier of its source —
-   exactly as it appears in the context, e.g. ``[uk/ukpga/2006/35/section/2@enacted]``
-   or ``[cl-cluster-1234]``.
-3. If the context does not actually answer the question, say so plainly
-   and stop. Do NOT invent citations or facts.
-4. Surface any adverse-treatment caveats supplied under "Caveats" at the
-   top of your answer.
-5. Always prepend the standing disclaimer the host system sends through.
-6. Be concise. Mirror the user's jurisdiction and as-of date framing.
-"""
+# Back-compat: external callers that imported ``_SYSTEM_PROMPT`` from this
+# module still get the EN common-law prompt. Active routing uses
+# ``system_prompt_for(query.language)`` per call.
+from .prompts import SYSTEM_PROMPT_EN as _SYSTEM_PROMPT  # noqa: E402, F401
 
 
 class AnthropicSynthesizer(Synthesizer):
@@ -287,14 +315,16 @@ class AnthropicSynthesizer(Synthesizer):
         caveats = caveats_from_good_law(candidates, good_law)
         user_prompt = _build_user_prompt(query, candidates, caveats)
 
-        # Prompt caching: keep system stable so subsequent calls hit cache.
+        # Prompt caching: each language is its own cache entry, but
+        # the per-language text is stable so subsequent calls in the same
+        # language hit cache.
         msg = self._client.messages.create(
             model=self.model,
             max_tokens=self._max_tokens,
             system=[
                 {
                     "type": "text",
-                    "text": _SYSTEM_PROMPT,
+                    "text": system_prompt_for(query.language),
                     "cache_control": {"type": "ephemeral"},
                 }
             ],
@@ -364,7 +394,7 @@ class OllamaSynthesizer(Synthesizer):
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt_for(query.language)},
                 {"role": "user", "content": user_prompt},
             ],
             "stream": False,
@@ -380,7 +410,7 @@ class OllamaSynthesizer(Synthesizer):
         except httpx.HTTPError as e:
             return Answer(
                 question=query.raw,
-                text=DISCLAIMER + f"\n\nOllama call failed: {e!s}",
+                text=disclaimer_for(query.language) + f"\n\nOllama call failed: {e!s}",
                 citations=[],
                 caveats=caveats + [f"Ollama backend error: {type(e).__name__}: {e}"],
                 used_candidates=list(candidates),
@@ -455,7 +485,7 @@ class AirLLMSynthesizer(Synthesizer):
 
         caveats = caveats_from_good_law(candidates, good_law)
         user_prompt = _build_user_prompt(query, candidates, caveats)
-        prompt = f"{_SYSTEM_PROMPT}\n\n{user_prompt}"
+        prompt = f"{system_prompt_for(query.language)}\n\n{user_prompt}"
 
         try:
             input_tokens = self._model.tokenizer(
@@ -481,7 +511,7 @@ class AirLLMSynthesizer(Synthesizer):
         except Exception as e:  # noqa: BLE001
             return Answer(
                 question=query.raw,
-                text=DISCLAIMER + f"\n\nAirLLM call failed: {e!s}",
+                text=disclaimer_for(query.language) + f"\n\nAirLLM call failed: {e!s}",
                 citations=[],
                 caveats=caveats + [f"AirLLM backend error: {type(e).__name__}: {e}"],
                 used_candidates=list(candidates),
@@ -519,27 +549,28 @@ class FakeSynthesizer(Synthesizer):
     ) -> Answer:
         caveats = caveats_from_good_law(candidates, good_law)
         if not candidates:
-            return Answer(
-                question=query.raw,
-                text=DISCLAIMER + "\n\nNo authorities matched the query.",
-                citations=[],
-                caveats=caveats,
-                used_candidates=[],
-                model=self.model,
-            )
+            return _empty_answer(query, self.model)
         top = candidates[0]
         snippet = (top.text or "").strip()
         if len(snippet) > 500:
             snippet = snippet[:500].rstrip() + "…"
         cited = sorted({c.parent_id for c in candidates if c.parent_id})
-        body = (
-            f"Based on the retrieved authorities, the closest match is "
-            f"[{top.parent_id}]. Relevant text: {snippet}\n\n"
-            f"All considered authorities: {', '.join(f'[{x}]' for x in cited)}."
-        )
+        lang = (query.language or "en").lower()
+        if lang == "da":
+            body = (
+                f"Baseret på de hentede kilder er den nærmeste match "
+                f"[{top.parent_id}]. Relevant tekst: {snippet}\n\n"
+                f"Alle betragtede kilder: {', '.join(f'[{x}]' for x in cited)}."
+            )
+        else:
+            body = (
+                f"Based on the retrieved authorities, the closest match is "
+                f"[{top.parent_id}]. Relevant text: {snippet}\n\n"
+                f"All considered authorities: {', '.join(f'[{x}]' for x in cited)}."
+            )
         return Answer(
             question=query.raw,
-            text=DISCLAIMER + "\n\n" + body,
+            text=disclaimer_for(lang) + "\n\n" + body,
             citations=cited,
             caveats=caveats,
             used_candidates=list(candidates),
