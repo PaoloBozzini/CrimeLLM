@@ -112,6 +112,52 @@ class Settings(BaseSettings):
     def is_enabled(self, jurisdiction: str) -> bool:
         return jurisdiction.upper() in {j.upper() for j in self.enabled_jurisdictions}
 
+    # Autofetch (self-management): when a citation references a doc not in
+    # Neo4j, the reconciliation worker fetches → parses → loads → embeds it
+    # asynchronously. Gated off by default; see
+    # ``docs/self-management-autofetch.local.md`` for the full design.
+    # Source-QPS map caps per-source request rate so a cite-flood can't
+    # hammer a third-party API; the worker reads it via the circuit breaker.
+    autofetch_enabled: bool = Field(default=False)
+    autofetch_queue_path: Path = Field(default=Path("data/autofetch.db"))
+    autofetch_max_depth: int = Field(default=2)
+    autofetch_max_attempts: int = Field(default=3)
+    autofetch_circuit_open_seconds: int = Field(default=3600)
+    autofetch_source_qps: Annotated[dict[str, float], NoDecode] = Field(
+        default_factory=lambda: {
+            "eurlex": 0.5,
+            "retsinformation": 1.0,
+            "courtlistener": 2.0,
+        }
+    )
+
+    @field_validator("autofetch_source_qps", mode="before")
+    @classmethod
+    def _parse_autofetch_source_qps(cls, v: object) -> dict[str, float]:
+        """Accept env-CSV ``source:qps,source:qps`` or a dict.
+
+        Pydantic env loading hands strings here; without this the dict field
+        would raise. Empty / None falls back to the field's default factory.
+        """
+        if v is None or v == "":
+            return {"eurlex": 0.5, "retsinformation": 1.0, "courtlistener": 2.0}
+        if isinstance(v, dict):
+            return {str(k): float(val) for k, val in v.items()}
+        if isinstance(v, str):
+            out: dict[str, float] = {}
+            for pair in v.split(","):
+                pair = pair.strip()
+                if not pair:
+                    continue
+                if ":" not in pair:
+                    raise ValueError(
+                        f"autofetch_source_qps: expected 'source:qps', got {pair!r}"
+                    )
+                k, rhs = pair.split(":", 1)
+                out[k.strip()] = float(rhs.strip())
+            return out
+        raise TypeError(f"autofetch_source_qps: unsupported type {type(v).__name__}")
+
     @model_validator(mode="before")
     @classmethod
     def _derive_embedding_dim(cls, values: Any) -> Any:

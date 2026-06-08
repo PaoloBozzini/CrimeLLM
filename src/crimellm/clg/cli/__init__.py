@@ -25,6 +25,7 @@ from typing import Annotated
 
 import typer
 
+from . import autofetch as autofetch_cli
 from . import graph as graph_cli
 from . import ingest as ingest_cli
 from . import link as link_cli
@@ -44,6 +45,7 @@ app.add_typer(ingest_cli.app, name="ingest")
 app.add_typer(parse_cli.app, name="parse")
 app.add_typer(link_cli.app, name="link")
 app.add_typer(load_cli.app, name="load")
+app.add_typer(autofetch_cli.app, name="autofetch")
 
 
 # --- top-level commands ----------------------------------------------------

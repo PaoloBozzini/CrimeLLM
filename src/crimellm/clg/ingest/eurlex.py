@@ -160,6 +160,50 @@ class EurLexSource(Source):
                     # Skip treaties / international agreements for now.
                     continue
 
+    # --- autofetch single-ID fetch (Phase C.2) -----------------------------
+
+    def supports_single_fetch(self) -> bool:
+        return True
+
+    def fetch_one(
+        self,
+        ctx: IngestContext,
+        cite_id: str,
+        *,
+        client: httpx.Client | None = None,
+    ) -> dict[str, Path]:
+        """Download one EUR-Lex resource by CELEX / ECLI:EU / ELI slash-form.
+
+        All three shapes are normalised to a CELEX before hitting the cellar
+        endpoint, which is the only single-doc retrieval the public API
+        supports cleanly. Default language + format come from the instance
+        (``languages[0]``, ``fmt``); the autofetch worker doesn't override
+        either today.
+        """
+        from ..autofetch.exceptions import UnsupportedCite
+
+        celex = _to_celex(cite_id)
+        if celex is None:
+            raise UnsupportedCite(
+                f"cite {cite_id!r}: not a CELEX, ECLI:EU, or supported ELI slash-form."
+            )
+
+        language = self.languages[0] if self.languages else "en"
+        dest = ctx.source_raw_dir(self.name)
+        owns_client = client is None
+        if client is None:
+            client = httpx.Client(headers=UA, timeout=60.0, follow_redirects=True)
+        try:
+            path = download_celex(client, celex, dest, language=language, fmt=self.fmt)
+        finally:
+            if owns_client:
+                client.close()
+        if path is None:
+            raise UnsupportedCite(
+                f"cite {cite_id!r}: CELEX {celex} returned 404 from CELLAR."
+            )
+        return {cite_id: path}
+
     def load(self, ctx: IngestContext) -> LoadReport:
         from ..graph.loaders import (
             load_cases,
@@ -200,6 +244,41 @@ class EurLexSource(Source):
                 "format": self.fmt,
             },
         )
+
+
+# --- autofetch helpers ----------------------------------------------------
+#
+# Conversion rules (single source of truth, kept module-local so the rest of
+# the pipeline keeps using its own canonical IDs):
+#
+# - CELEX shape ``[1-9]\d{4}[A-Z]{1,2}\d{4}`` → returned verbatim.
+# - ECLI:EU:<C|T|F>:<year>:<num> → CELEX ``6<year><CJ|TJ|FJ><num zero-padded 4>``.
+# - eu/<reg|dir|dec>/<year>/<num>[/...] → CELEX ``3<year><R|L|D><num zero-padded 4>``.
+
+import re as _re
+
+_CELEX_RE_EXACT = _re.compile(r"^[1-9]\d{4}[A-Z]{1,2}\d{4}$")
+_ECLI_EU_RE = _re.compile(r"^ECLI:EU:(?P<court>[CTF]):(?P<year>\d{4}):(?P<num>\d+)$")
+_ELI_EU_RE = _re.compile(
+    r"^eu/(?P<type>reg|dir|dec)/(?P<year>\d{4})/(?P<num>\d+)(?:/.*)?$"
+)
+_ECLI_COURT_TO_CELEX = {"C": "CJ", "T": "TJ", "F": "FJ"}
+_ELI_TYPE_TO_CELEX = {"reg": "R", "dir": "L", "dec": "D"}
+
+
+def _to_celex(cite_id: str) -> str | None:
+    """Normalise CELEX / ECLI:EU / ELI to a CELEX. ``None`` when unrecognised."""
+    if _CELEX_RE_EXACT.match(cite_id):
+        return cite_id
+    m = _ECLI_EU_RE.match(cite_id)
+    if m:
+        court = _ECLI_COURT_TO_CELEX[m["court"]]
+        return f"6{m['year']}{court}{int(m['num']):04d}"
+    m = _ELI_EU_RE.match(cite_id)
+    if m:
+        type_letter = _ELI_TYPE_TO_CELEX[m["type"]]
+        return f"3{m['year']}{type_letter}{int(m['num']):04d}"
+    return None
 
 
 # --- functional shim (mirror legislation_uk.download_all) -----------------

@@ -87,3 +87,28 @@ class Source(ABC):
     @abstractmethod
     def load(self, ctx: IngestContext) -> LoadReport:
         """Run parse + push to Neo4j; return counts."""
+
+    # --- Single-ID fetch (autofetch worker boundary) -----------------------
+    #
+    # The autofetch reconciliation worker (``clg/autofetch``) needs to fetch
+    # one doc at a time by canonical ID (ECLI / ELI / CELEX / etc.) instead
+    # of running a full bulk dump. Subclasses opt in by overriding
+    # ``supports_single_fetch`` and ``fetch_one``. The default is "no":
+    # missing override raises at the worker boundary so a misconfigured
+    # resolver fails loud instead of silently dropping cite-misses on the
+    # floor. See ``docs/self-management-autofetch.local.md`` §4.
+
+    def supports_single_fetch(self) -> bool:
+        """Return ``True`` when this source implements ``fetch_one``."""
+        return False
+
+    def fetch_one(self, ctx: IngestContext, cite_id: str) -> dict[str, Path]:
+        """Download one doc by canonical ID. Idempotent. Phase C lands per-source overrides.
+
+        Raises ``NotImplementedError`` by default; the autofetch resolver
+        guards against this via ``supports_single_fetch`` before dispatch.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement single-ID fetch; "
+            "override supports_single_fetch + fetch_one or skip in resolver."
+        )

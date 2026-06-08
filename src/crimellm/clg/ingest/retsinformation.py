@@ -299,6 +299,68 @@ class RetsinformationSource(Source):
                     (pr.instrument.id, f"eu/celex/{celex}", celex),
                 )
 
+    # --- autofetch single-ID fetch (Phase C.1) -----------------------------
+
+    def supports_single_fetch(self) -> bool:
+        return True
+
+    def fetch_one(
+        self,
+        ctx: IngestContext,
+        cite_id: str,
+        *,
+        client: httpx.Client | None = None,
+    ) -> dict[str, Path]:
+        """Download one DK statute by slash-form ELI (``eli/lov/<year>/<num>``).
+
+        Slug-shape ids (``DK/<short_title>/section/...``) raise
+        ``UnsupportedCite`` — the public Retsinformation API has no
+        short-title lookup; the operator must hand-map the slug to an ELI
+        before re-enqueueing.
+
+        Caches the resulting LexDania XML in ``raw/retsinformation/`` and
+        records the mapped accn on ``self.slash_form_map`` so a downstream
+        ``parse``/``load`` knows the canonical Instrument id without
+        re-resolving.
+
+        ``client`` is injectable so tests can pass an ``httpx.MockTransport``
+        without monkeypatching the global ``httpx`` module.
+        """
+        from ..autofetch.exceptions import UnsupportedCite
+
+        triple = _parse_autofetch_eli(cite_id)
+        if triple is None:
+            raise UnsupportedCite(
+                f"cite {cite_id!r}: only slash-form ELI supported "
+                "(eli/lov|lbk|bek|cir/<year>/<num>); slug shapes and bare slugs "
+                "have no API mapping."
+            )
+        doc_type, year, num = triple
+
+        dest = ctx.source_raw_dir(self.name)
+        owns_client = client is None
+        if client is None:
+            client = httpx.Client(headers=UA, timeout=60.0, follow_redirects=True)
+        try:
+            accn = resolve_accn(year, num, client=client)
+            if accn is None:
+                raise UnsupportedCite(
+                    f"cite {cite_id!r}: RDFa shell at {rdfa_url(year, num)} "
+                    "did not embed an accn — document may not exist or pub-media "
+                    "is non-default."
+                )
+            path = download_accn(client, accn, dest)
+        finally:
+            if owns_client:
+                client.close()
+        if path is None:
+            raise UnsupportedCite(
+                f"cite {cite_id!r}: accn {accn} XML fetch returned 404."
+            )
+
+        self.slash_form_map[accn] = (doc_type, year, num)
+        return {cite_id: path}
+
     def load(self, ctx: IngestContext) -> LoadReport:
         from ..graph.loaders import (
             load_implements,
@@ -332,6 +394,23 @@ class RetsinformationSource(Source):
                 "explode_subparagraphs": self.explode_subparagraphs,
             },
         )
+
+
+# --- autofetch helpers ----------------------------------------------------
+
+# Slash-form ELI shapes the autofetch resolver routes here. Anything else
+# (slug, bare ELI without doc_type) is unsupported for now.
+_AUTOFETCH_ELI_RE = re.compile(
+    r"^eli/(?P<doc>lov|lbk|bek|cir)/(?P<year>\d{4})/(?P<num>\d+)(?:/.*)?$"
+)
+
+
+def _parse_autofetch_eli(cite_id: str) -> tuple[str, int, int] | None:
+    """Return ``(doc_type, year, num)`` for supported autofetch shapes."""
+    m = _AUTOFETCH_ELI_RE.match(cite_id)
+    if not m:
+        return None
+    return (m["doc"], int(m["year"]), int(m["num"]))
 
 
 # --- helpers --------------------------------------------------------------

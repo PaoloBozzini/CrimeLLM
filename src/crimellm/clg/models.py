@@ -97,6 +97,11 @@ class Case(_Neo4jPropsMixin):
     decision_date: date | None
     citations: list[str] = field(default_factory=list)  # alt identifiers
     provenance: list[Provenance] = field(default_factory=list)
+    # Autofetch provenance: worker-loaded nodes set auto_ingested=True,
+    # validated=False until a human promotes them. Hand-loaded nodes keep
+    # the defaults below. Eval filters use coalesce(n.validated, true).
+    auto_ingested: bool = False
+    validated: bool = True
 
     # `provenance` is a list of nested objects — keep it out of the flat
     # Neo4j row dict; the loader pulls provenance[0] into top-level fields.
@@ -113,6 +118,8 @@ class Instrument(_Neo4jPropsMixin):
     short_title: str
     year: int | None = None
     provenance: list[Provenance] = field(default_factory=list)
+    auto_ingested: bool = False
+    validated: bool = True
 
     _props_exclude: ClassVar[frozenset[str]] = frozenset({"provenance"})
 
@@ -130,6 +137,8 @@ class Provision(_Neo4jPropsMixin):
     valid_from: date | None = None
     valid_to: date | None = None
     version_id: str | None = None
+    auto_ingested: bool = False
+    validated: bool = True
 
 
 @dataclass(slots=True)

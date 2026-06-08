@@ -86,7 +86,9 @@ MERGE (c:Case {id: row.id})
                 c.source = row.source, c.source_url = row.source_url,
                 c.source_id = row.source_id,
                 c.retrieved_at = CASE WHEN row.retrieved_at IS NULL
-                                      THEN NULL ELSE date(row.retrieved_at) END
+                                      THEN NULL ELSE date(row.retrieved_at) END,
+                c.auto_ingested = row.auto_ingested,
+                c.validated = row.validated
   ON MATCH  SET c.name = coalesce(row.name, c.name),
                 c.decision_date = coalesce(
                     CASE WHEN row.decision_date IS NULL
@@ -240,7 +242,9 @@ MERGE (i:Instrument {id: row.id})
                 i.source = row.source, i.source_url = row.source_url,
                 i.source_id = row.source_id,
                 i.retrieved_at = CASE WHEN row.retrieved_at IS NULL
-                                      THEN NULL ELSE date(row.retrieved_at) END
+                                      THEN NULL ELSE date(row.retrieved_at) END,
+                i.auto_ingested = row.auto_ingested,
+                i.validated = row.validated
   ON MATCH  SET i.short_title = coalesce(row.short_title, i.short_title),
                 i.year = coalesce(row.year, i.year)
 MERGE (i)-[:IN_JURISDICTION]->(j)
@@ -277,7 +281,9 @@ MERGE (p:Provision {id: row.id})
                 p.valid_from = CASE WHEN row.valid_from IS NULL
                                     THEN NULL ELSE date(row.valid_from) END,
                 p.valid_to   = CASE WHEN row.valid_to IS NULL
-                                    THEN NULL ELSE date(row.valid_to) END
+                                    THEN NULL ELSE date(row.valid_to) END,
+                p.auto_ingested = row.auto_ingested,
+                p.validated = row.validated
   ON MATCH  SET p.text = coalesce(row.text, p.text),
                 p.valid_to = CASE WHEN row.valid_to IS NULL
                                   THEN p.valid_to ELSE date(row.valid_to) END

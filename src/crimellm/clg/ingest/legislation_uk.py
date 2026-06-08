@@ -48,6 +48,13 @@ UK_CRIMINAL_ACTS: tuple[tuple[str, int, int], ...] = (
 DEFAULT_VERSIONS = ("enacted", "current")
 _VERSION_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# Autofetch routes ``uk/<act_type>/<year>/<num>[/...]`` ids here. Trailing
+# section/paragraph segments are tolerated and ignored — the worker always
+# pulls the whole-act XML and the parser splits provisions.
+_AUTOFETCH_UK_ELI_RE = re.compile(
+    r"^uk/(?P<act>ukpga|asp|nia|wsi)/(?P<year>\d{4})/(?P<num>\d+)(?:/.*)?$"
+)
+
 
 # --- URL builders ----------------------------------------------------------
 
@@ -143,6 +150,46 @@ class LegislationUKSource(Source):
                     seen_instruments.add(inst.id)
                 for prov in provisions:
                     yield ("provision", prov)
+
+    # --- autofetch single-ID fetch (Phase C.4) -----------------------------
+
+    def supports_single_fetch(self) -> bool:
+        return True
+
+    def fetch_one(
+        self,
+        ctx: IngestContext,
+        cite_id: str,
+        *,
+        client: httpx.Client | None = None,
+        version: str = "current",
+    ) -> dict[str, Path]:
+        """Download one UK Act by ELI (``uk/<act_type>/<year>/<num>``)."""
+        from ..autofetch.exceptions import UnsupportedCite
+
+        m = _AUTOFETCH_UK_ELI_RE.match(cite_id)
+        if m is None:
+            raise UnsupportedCite(
+                f"cite {cite_id!r}: only uk/<act_type>/<year>/<num> supported."
+            )
+        act_type = m["act"]
+        year = int(m["year"])
+        number = int(m["num"])
+
+        dest = ctx.source_raw_dir(self.name)
+        owns_client = client is None
+        if client is None:
+            client = httpx.Client(headers=UA, timeout=60.0, follow_redirects=True)
+        try:
+            path = download_act(client, act_type, year, number, version, dest)
+        finally:
+            if owns_client:
+                client.close()
+        if path is None:
+            raise UnsupportedCite(
+                f"cite {cite_id!r}: {act_url(act_type, year, number, version)} returned 404."
+            )
+        return {cite_id: path}
 
     def load(self, ctx: IngestContext) -> LoadReport:
         """Push parsed Instruments + Provisions into Neo4j and return counts."""
