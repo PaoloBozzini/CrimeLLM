@@ -55,6 +55,11 @@ class Answer:
     caveats: list[str] = field(default_factory=list)
     used_candidates: list[Candidate] = field(default_factory=list)
     model: str = ""
+    # Resolved query metadata — what the pipeline actually used after
+    # parse_query + with_overrides. Useful for CLI audit + eval reports.
+    jurisdiction: str | None = None
+    language: str = "en"
+    as_of: str = ""
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -73,6 +78,9 @@ class Answer:
                 for c in self.used_candidates
             ],
             "model": self.model,
+            "jurisdiction": self.jurisdiction,
+            "language": self.language,
+            "as_of": self.as_of,
         }
 
 
@@ -152,6 +160,9 @@ def _empty_answer(query: Query, model: str) -> Answer:
         caveats=[],
         used_candidates=[],
         model=model,
+        jurisdiction=query.jurisdiction,
+        language=query.language,
+        as_of=query.as_of.isoformat(),
     )
 
 
@@ -240,6 +251,9 @@ def _finalise_answer(
         caveats=caveats,
         used_candidates=list(candidates),
         model=model_name,
+        jurisdiction=query.jurisdiction,
+        language=lang,
+        as_of=query.as_of.isoformat(),
     )
 
 
@@ -415,6 +429,9 @@ class OllamaSynthesizer(Synthesizer):
                 caveats=caveats + [f"Ollama backend error: {type(e).__name__}: {e}"],
                 used_candidates=list(candidates),
                 model=self.model,
+                jurisdiction=query.jurisdiction,
+                language=query.language,
+                as_of=query.as_of.isoformat(),
             )
         return _finalise_answer(
             query=query,
@@ -516,6 +533,9 @@ class AirLLMSynthesizer(Synthesizer):
                 caveats=caveats + [f"AirLLM backend error: {type(e).__name__}: {e}"],
                 used_candidates=list(candidates),
                 model=self.model,
+                jurisdiction=query.jurisdiction,
+                language=query.language,
+                as_of=query.as_of.isoformat(),
             )
 
         return _finalise_answer(
@@ -575,6 +595,9 @@ class FakeSynthesizer(Synthesizer):
             caveats=caveats,
             used_candidates=list(candidates),
             model=self.model,
+            jurisdiction=query.jurisdiction,
+            language=lang,
+            as_of=query.as_of.isoformat(),
         )
 
 

@@ -10,7 +10,7 @@ Single front door to every stage of the pipeline. Each phase (graph admin, inges
 
 | File | Commands |
 |---|---|
-| `__init__.py` | Top-level app + registers groups; defines `clg embed`, `clg embed-rebuild`, `clg query`, `clg eval` |
+| `__init__.py` | Top-level app + registers groups; defines `clg embed`, `clg embed-rebuild`, `clg query` (supports `--jurisdiction US\|EW\|UK\|EU\|DK` + `--lang en\|da` overrides; JSON mode exposes resolved jurisdiction / language / as_of for audit), `clg eval` |
 | `graph.py` | `clg graph init / status / wipe / drop-schema / rebuild-vector-index / cites / cited-by / counts / search / provision-as-of` |
 | `ingest.py` | `clg ingest courtlistener / courtlistener-status / courtlistener-index / legislation-uk / eurlex / retsinformation / domstol / karnov / find-case-law` |
 | `parse.py` | `clg parse retsinformation / eurlex / domstol` (sanity check; `clg load` runs parse internally) |

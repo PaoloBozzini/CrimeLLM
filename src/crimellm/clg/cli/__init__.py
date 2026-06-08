@@ -299,10 +299,23 @@ def query_cmd(
         typer.Option(
             "--jurisdiction",
             "-j",
-            help="US|EW|UK. Default = infer from the question.",
+            help=(
+                "US|EW|UK|EU|DK. Default = infer from the question. "
+                "Caller-knows-best: overrides bypass the enabled_jurisdictions filter."
+            ),
         ),
     ] = None,
     as_of: Annotated[str | None, typer.Option("--as-of", help="ISO date. Default = today.")] = None,
+    language: Annotated[
+        str | None,
+        typer.Option(
+            "--lang",
+            help=(
+                "en|da. Default = auto-detect from question text. Use this to "
+                "force synthesis output language (e.g. ask in EN, get DA answer)."
+            ),
+        ),
+    ] = None,
     seed_k: Annotated[int, typer.Option("--seed-k", help="Vector-search seeds.")] = 8,
     top_k: Annotated[int, typer.Option("--top-k", help="Candidates kept after rerank.")] = 6,
     embedder_backend: Annotated[
@@ -362,6 +375,7 @@ def query_cmd(
         question,
         jurisdiction=jurisdiction,  # type: ignore[arg-type]
         as_of=as_of,
+        language=language,
         seed_k=seed_k,
         top_k=top_k,
         embedder_backend=embedder_backend,

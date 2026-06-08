@@ -136,7 +136,11 @@ def search(
     k: Annotated[int, typer.Option("--k", "-k")] = 5,
     jurisdiction: Annotated[
         str | None,
-        typer.Option("--jurisdiction", "-j", help="US/EW/UK filter."),
+        typer.Option(
+            "--jurisdiction",
+            "-j",
+            help="US|EW|UK|EU|DK filter (must be in ENABLED_JURISDICTIONS).",
+        ),
     ] = None,
     parent_type: Annotated[
         str | None,

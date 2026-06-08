@@ -117,7 +117,7 @@ def distill(
     ] = True,
     jurisdiction: Annotated[
         str | None,
-        typer.Option("--jurisdiction", "-j", help="US|EW|UK filter."),
+        typer.Option("--jurisdiction", "-j", help="US|EW|UK|EU|DK filter."),
     ] = None,
     seed: Annotated[int, typer.Option("--seed")] = 42,
     batch_size: Annotated[int, typer.Option("--batch-size")] = 16,
@@ -372,7 +372,12 @@ def treatment(
         ),
     ] = False,
     jurisdiction: Annotated[
-        str | None, typer.Option("--jurisdiction", "-j", help="Restrict to one jurisdiction.")
+        str | None,
+        typer.Option(
+            "--jurisdiction",
+            "-j",
+            help="Restrict to one jurisdiction (US|EW|UK|EU|DK).",
+        ),
     ] = None,
     max_edges: Annotated[
         int | None,

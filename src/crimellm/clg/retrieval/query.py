@@ -23,6 +23,7 @@ def run_query(
     *,
     jurisdiction: Jurisdiction | None = None,
     as_of: str | _date | None = None,
+    language: str | None = None,
     seed_k: int = 8,
     top_k: int = 6,
     weights: RerankWeights | None = None,
@@ -38,12 +39,19 @@ def run_query(
     ``embedder_backend`` / ``synthesizer_name`` are convenience hooks so the
     CLI doesn't have to construct the backends itself; they're ignored when
     explicit ``embedder`` / ``synthesizer`` are passed.
+
+    ``language`` (``"en"`` / ``"da"``) overrides the detector when the
+    caller wants to force a synthesis language regardless of what the
+    question itself looks like — useful when an EN-speaking lawyer asks
+    about a Danish statute and wants the answer in DA, or vice versa.
     """
     store = store or get_store()
     embedder = embedder or get_embedder(embedder_backend)
     synthesizer = synthesizer or get_synthesizer(synthesizer_name)
 
-    query: Query = parse_query(question).with_overrides(jurisdiction=jurisdiction, as_of=as_of)
+    query: Query = parse_query(question).with_overrides(
+        jurisdiction=jurisdiction, as_of=as_of, language=language
+    )
 
     seeds = seed_from_chunks(query, embedder, k=seed_k, store=store)
     expansions = expand_seeds(seeds, query=query, store=store)
