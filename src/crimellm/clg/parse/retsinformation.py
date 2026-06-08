@@ -1,16 +1,21 @@
 """Retsinformation XML → ``Instrument`` + ``Provision``.
 
 Retsinformation publishes Danish primary law (love, lovbekendtgørelser,
-bekendtgørelser) under ELI-compliant URIs:
+bekendtgørelser) via the harvest API at ``api.retsinformation.dk`` with
+per-document XML at:
 
-    https://www.retsinformation.dk/eli/<doc_type>/<year>/<num>
+    http://retsinformation.dk/eli/accn/<ACCN>/xml
 
-The XML serialisation is a custom Civilstyrelsen schema (loosely
-Akoma-Ntoso-influenced). For Phase 4 we parse a deliberately small subset
-that's stable across document types: ``<dokument>`` root with metadata
-header + body of ``<paragraf>`` (=§) → ``<stk>`` (=stykke) → ``<nr>``
-(=nummer) elements. The fixture under ``tests/clg/fixtures/retsinformation/``
-mirrors what an operator gets back from the portal's XML export.
+The XML serialisation is the **LexDania** schema (Civilstyrelsen's XML
+DTD family). For Phase 4 we parse the subset that's stable across
+document types: ``<Dokument>`` root with ``<Meta>`` header +
+``<DokumentIndhold>`` body containing ``<Paragraf localId="N">`` (=§)
+→ ``<Stk>`` (=stykke) → ``<Indentatio formaInd="Nummer">`` (=nr)
+elements. Text bodies live in ``<Exitus><Linea><Char>...</Char></Linea>``.
+
+For backward compatibility this module also handles an older synthetic
+schema (lower-case ``<dokument>/<paragraf>/<stk>/<nr>``) used in some
+tests / hand-saved exports. The two paths are routed by root tag.
 
 Identifiers:
 
@@ -236,11 +241,28 @@ def parse_statute(
     ``Provision`` nodes (True, default) or get folded into the parent §
     text (False). True gives finer-grained chunks for retrieval; False is
     cheaper at index time.
+
+    Auto-routes between the real **LexDania** schema served by the live
+    Retsinformation API (``<Dokument>`` root) and an older synthetic
+    schema (lowercase ``<dokument>`` root) kept around for back-compat
+    fixtures.
     """
     if doc_type.lower() not in DOC_TYPES:
         raise ValueError(f"unknown DK doc_type {doc_type!r}; pick from {DOC_TYPES}")
 
     root = etree.fromstring(xml_bytes)
+
+    # Dispatch on root tag name (LexDania uses CapWord, synthetic uses lowercase).
+    if root.tag == "Dokument":
+        return _parse_lexdania(
+            root,
+            doc_type=doc_type,
+            year=year,
+            num=num,
+            source_url=source_url,
+            retrieved_at=retrieved_at,
+            explode_subparagraphs=explode_subparagraphs,
+        )
 
     title = _meta_text(root, "titel") or _meta_text(root, "title")
     # Try common surface forms for publication / consolidation date.
@@ -369,3 +391,189 @@ def parse_statute(
 def parse_statute_file(path: Path | str, **kwargs: Any) -> StatuteParse:
     raw = Path(path).read_bytes()
     return parse_statute(raw, **kwargs)
+
+
+# --- LexDania (real Retsinformation API schema) --------------------------
+
+
+_STK_NUM_RE = re.compile(r"Stk\.\s*(\d+)", re.IGNORECASE)
+_NR_NUM_RE = re.compile(r"^(\d+[a-z]?)\)")
+
+
+def _explicatus_text(parent: etree._Element) -> str:
+    """Return the direct ``<Explicatus>`` child's text (e.g. ``§ 1.``, ``Stk. 2.``, ``1)``)."""
+    for child in parent:
+        if child.tag == "Explicatus":
+            return _itertext(child)
+    return ""
+
+
+def _exitus_text(parent: etree._Element) -> str:
+    """Concatenate all ``<Exitus>...</Exitus>`` direct/child text inside ``parent``,
+    skipping any nested ``<Indentatio>`` blocks (those become separate Provisions)."""
+    parts: list[str] = []
+    for exitus in parent.iterfind("Exitus"):
+        # Drop nested Indentatio so the parent body doesn't double-count.
+        for sub in list(exitus):
+            if sub.tag == "Index":
+                exitus.remove(sub)
+        t = _itertext(exitus)
+        if t:
+            parts.append(t)
+    return _ws(" ".join(parts))
+
+
+def _stk_number(stk_el: etree._Element, fallback_idx: int) -> str:
+    """Extract a stk. number — from ``<Explicatus>`` or by document-order index."""
+    expl = _explicatus_text(stk_el)
+    m = _STK_NUM_RE.search(expl)
+    if m:
+        return m.group(1)
+    return str(fallback_idx + 1)
+
+
+def _nr_number(nr_el: etree._Element, fallback_idx: int) -> str:
+    """Extract a nr. number from ``<Indentatio><Explicatus>1)</Explicatus>``."""
+    expl = _explicatus_text(nr_el)
+    m = _NR_NUM_RE.match(expl.strip())
+    if m:
+        return m.group(1)
+    return str(fallback_idx + 1)
+
+
+def _parse_lexdania(
+    root: etree._Element,
+    *,
+    doc_type: str,
+    year: int,
+    num: int,
+    source_url: str | None,
+    retrieved_at: date | None,
+    explode_subparagraphs: bool,
+) -> StatuteParse:
+    """Real LexDania parser. ``<Dokument><Meta>`` + ``<DokumentIndhold>`` body."""
+    meta = root.find("Meta")
+
+    def _meta(tag: str) -> str:
+        if meta is None:
+            return ""
+        el = meta.find(tag)
+        return _itertext(el) if el is not None else ""
+
+    accn = _meta("AccessionNumber")
+    title = _meta("PopularTitle") or _meta("DocumentTitle")
+    publish = (
+        _date_or_none(_meta("DiesEdicti"))
+        or _date_or_none(_meta("StartDate"))
+        or _date_or_none(_meta("DiesSigni"))
+    )
+    end_date = _date_or_none(_meta("EndDate"))
+    # End-of-time sentinel in LexDania (9999-12-31) → None for valid_to.
+    if end_date and end_date.year >= 9999:
+        end_date = None
+
+    iid = instrument_id(doc_type, year, num)
+    prov = Provenance(
+        source="retsinformation",
+        source_url=source_url or (
+            f"http://retsinformation.dk/eli/accn/{accn}/xml" if accn else eli_url(doc_type, year, num)
+        ),
+        retrieved_at=retrieved_at or date.today(),
+        source_id=accn or iid,
+    )
+
+    instrument = Instrument(
+        id=iid,
+        jurisdiction="DK",
+        short_title=title or iid,
+        year=year,
+        provenance=[prov],
+    )
+
+    provisions: list[Provision] = []
+    indhold = root.find("DokumentIndhold")
+    if indhold is not None:
+        for paragraf in indhold.iter("Paragraf"):
+            par_num = (paragraf.get("localId") or "").strip()
+            if not par_num:
+                # Try Explicatus ("§ 1.") fallback.
+                expl = _explicatus_text(paragraf)
+                m = re.search(r"§\s*(\d+[a-z]?)", expl)
+                par_num = m.group(1) if m else ""
+            if not par_num:
+                continue
+
+            stk_elements = list(paragraf.iterfind("Stk"))
+            if not stk_elements or not explode_subparagraphs:
+                # Flat §: one Provision for the whole paragraph.
+                text = _itertext(paragraf)
+                provisions.append(
+                    Provision(
+                        id=provision_id(doc_type, year, num, par_num),
+                        instrument_id=iid,
+                        jurisdiction="DK",
+                        section_path=section_path(par_num),
+                        text=text,
+                        valid_from=publish,
+                        valid_to=end_date,
+                        version_id=None,
+                    )
+                )
+                continue
+
+            for stk_idx, stk_el in enumerate(stk_elements):
+                stk_num = _stk_number(stk_el, stk_idx)
+                nr_elements = list(stk_el.iterfind(".//Indentatio[@formaInd='Nummer']"))
+                if nr_elements:
+                    for nr_idx, nr_el in enumerate(nr_elements):
+                        nr_num = _nr_number(nr_el, nr_idx)
+                        text = _itertext(nr_el)
+                        head = section_path(par_num, stk_num, nr_num)
+                        body = f"{head}\n\n{text}" if text else head
+                        provisions.append(
+                            Provision(
+                                id=provision_id(doc_type, year, num, par_num, stk_num, nr_num),
+                                instrument_id=iid,
+                                jurisdiction="DK",
+                                section_path=head,
+                                text=body,
+                                valid_from=publish,
+                                valid_to=end_date,
+                                version_id=None,
+                            )
+                        )
+                else:
+                    text = _exitus_text(stk_el) or _itertext(stk_el)
+                    head = section_path(par_num, stk_num)
+                    body = f"{head}\n\n{text}" if text else head
+                    provisions.append(
+                        Provision(
+                            id=provision_id(doc_type, year, num, par_num, stk_num),
+                            instrument_id=iid,
+                            jurisdiction="DK",
+                            section_path=head,
+                            text=body,
+                            valid_from=publish,
+                            valid_to=end_date,
+                            version_id=None,
+                        )
+                    )
+
+    # LexDania <Meta><EuReferences>CELEX</EuReferences> gives us the IMPLEMENTS
+    # seeds **directly**, no preamble regex needed. Also scan the body as a
+    # fallback for documents that embed CELEX inline.
+    cites: list[str] = []
+    seen: set[str] = set()
+    if meta is not None:
+        for ref in meta.iterfind("EuReferences"):
+            celex = _ws(ref.text or "")
+            if celex and celex not in seen:
+                seen.add(celex)
+                cites.append(celex)
+    if indhold is not None:
+        for c in extract_eu_celex_refs(_itertext(indhold)):
+            if c not in seen:
+                seen.add(c)
+                cites.append(c)
+
+    return StatuteParse(instrument=instrument, provisions=provisions, cites_eu_celex=cites)

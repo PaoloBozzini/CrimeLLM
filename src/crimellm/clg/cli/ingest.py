@@ -195,33 +195,79 @@ def karnov() -> None:
 @app.command("retsinformation")
 def retsinformation(
     items: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--items",
-            help="CSV of slash-form DK statute ids, e.g. "
-            "'lbk/2018/502,lov/2023/1100,bek/2024/42'.",
+            help="CSV of accession numbers, e.g. 'A20180050229,B20260050805'. "
+            "Find an accn by browsing https://www.retsinformation.dk/ and "
+            "copying the value shown in the SPA URL or 'Download → XML' menu, "
+            "or by running --discover.",
         ),
-    ],
+    ] = None,
+    discover: Annotated[
+        bool,
+        typer.Option(
+            "--discover",
+            help="Print the daily-delta JSON feed from "
+            "https://api.retsinformation.dk/v1/Documents?date=... and exit. "
+            "Use --since to pick a date within the last 10 days.",
+        ),
+    ] = False,
+    since: Annotated[
+        str | None,
+        typer.Option(
+            "--since",
+            help="ISO date for --discover (default: today). Must be within "
+            "the last 10 days per the API contract.",
+        ),
+    ] = None,
 ) -> None:
-    """Download Danish primary law from retsinformation.dk by ELI."""
+    """Download Danish primary law from retsinformation.dk via the harvest API.
+
+    Two modes:
+
+      * ``--discover [--since YYYY-MM-DD]`` — print the daily-delta JSON
+        feed so the operator can identify accession numbers.
+      * ``--items A20180050229,B20260050805`` — download each accn's
+        LexDania XML to ``data/raw/retsinformation/<accn>.xml``.
+    """
     s = get_settings()
     if not s.is_enabled("DK"):
         raise typer.BadParameter(
             f"'DK' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
         )
     from ..ingest._base import IngestContext
-    from ..ingest.retsinformation import RetsinformationSource
+    from ..ingest.retsinformation import RetsinformationSource, discover_all
 
-    triples: list[tuple[str, int, int]] = []
-    for s_ in items.split(","):
-        parts = s_.strip().split("/")
-        if len(parts) != 3:
-            raise typer.BadParameter(
-                f"bad --items entry {s_!r}; want '<doc_type>/<year>/<num>'"
+    if discover:
+        feed = discover_all(date_iso=since)
+        typer.echo(
+            json.dumps(
+                [
+                    {
+                        "accn": d.get("accessionsnummer"),
+                        "documentId": d.get("documentId"),
+                        "type": (d.get("documentType") or {}).get("shortName"),
+                        "changeDate": d.get("changeDate"),
+                        "reasonForChange": d.get("reasonForChange"),
+                        "href": d.get("href"),
+                    }
+                    for d in feed
+                ],
+                indent=2,
+                ensure_ascii=False,
             )
-        triples.append((parts[0], int(parts[1]), int(parts[2])))
+        )
+        return
 
-    src = RetsinformationSource(items=tuple(triples))
+    if not items:
+        raise typer.BadParameter(
+            "pass --items <CSV of accession numbers> (e.g. 'A20180050229') "
+            "or --discover to find them via the daily-delta feed"
+        )
+
+    accns = tuple(a.strip() for a in items.split(",") if a.strip())
+    src = RetsinformationSource(accns=accns)
     paths = src.download(IngestContext())
     typer.echo(json.dumps({k: str(p) for k, p in paths.items()}, indent=2))
 

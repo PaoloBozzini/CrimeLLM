@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Dokument id="id-test" SchemaLocation="http://www.retsinformation.dk/offentlig/xml/schemas/LBKH.Retsinfo.LexDania_2.1.xsd">
+  <Meta>
+    <DocumentType>LBK H#LOKDOK03</DocumentType>
+    <Rank>A</Rank>
+    <AccessionNumber>A20180050229</AccessionNumber>
+    <DocumentId>DI-databeskyttelse</DocumentId>
+    <UniqueDocumentId>234229</UniqueDocumentId>
+    <DocumentTitle>Bekendtgørelse af lov om supplerende bestemmelser til forordning om beskyttelse af fysiske personer</DocumentTitle>
+    <Year>2018</Year>
+    <DiesSigni>2018-05-23</DiesSigni>
+    <StartDate>2018-05-25</StartDate>
+    <EndDate>9999-12-31</EndDate>
+    <Status>Valid</Status>
+    <Number>502</Number>
+    <PopularTitle>Databeskyttelsesloven</PopularTitle>
+    <AnnouncedIn>Lovtidende A</AnnouncedIn>
+    <DiesEdicti>2018-05-24</DiesEdicti>
+    <EuReferences>32016R0679</EuReferences>
+    <EuReferences>32016L0680</EuReferences>
+    <Ministry>Justitsministeriet</Ministry>
+  </Meta>
+  <TitelGruppe>
+    <Titel>Databeskyttelsesloven</Titel>
+  </TitelGruppe>
+  <DokumentIndhold>
+    <Kapitel id="k1" localId="1">
+      <Explicatus>Kapitel 1</Explicatus>
+      <Rubrica>Lovens anvendelsesområde</Rubrica>
+      <Paragraf id="p1" localId="1">
+        <Explicatus>§ 1.</Explicatus>
+        <Stk id="p1s1">
+          <Explicatus>Stk. 1.</Explicatus>
+          <Exitus><Linea><Char>Loven supplerer reglerne i databeskyttelsesforordningen.</Char></Linea></Exitus>
+        </Stk>
+        <Stk id="p1s2">
+          <Explicatus>Stk. 2.</Explicatus>
+          <Exitus><Linea><Char>Loven gælder for behandling af personoplysninger som nævnt i databeskyttelsesforordningens artikel 2.</Char></Linea></Exitus>
+        </Stk>
+      </Paragraf>
+      <Paragraf id="p6" localId="6">
+        <Explicatus>§ 6.</Explicatus>
+        <Stk id="p6s1">
+          <Explicatus>Stk. 1.</Explicatus>
+          <Exitus id="p6s1e1">
+            <Index>
+              <Indentatio id="p6s1n1" formaInd="Nummer">
+                <Explicatus>1)</Explicatus>
+                <Exitus><Linea><Char>Behandling må kun finde sted, hvis mindst en af betingelserne i databeskyttelsesforordningens artikel 6, stk. 1, er opfyldt.</Char></Linea></Exitus>
+              </Indentatio>
+              <Indentatio id="p6s1n2" formaInd="Nummer">
+                <Explicatus>2)</Explicatus>
+                <Exitus><Linea><Char>Behandling kan ske, hvis den registrerede har givet samtykke.</Char></Linea></Exitus>
+              </Indentatio>
+            </Index>
+          </Exitus>
+        </Stk>
+      </Paragraf>
+    </Kapitel>
+    <Paragraf id="p36" localId="36">
+      <Explicatus>§ 36.</Explicatus>
+      <Stk id="p36s1">
+        <Explicatus>Stk. 1.</Explicatus>
+        <Exitus><Linea><Char>Klager over Datatilsynets afgørelser kan ikke indbringes for anden administrativ myndighed.</Char></Linea></Exitus>
+      </Stk>
+    </Paragraf>
+  </DokumentIndhold>
+</Dokument>

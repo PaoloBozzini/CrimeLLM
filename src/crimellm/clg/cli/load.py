@@ -176,7 +176,8 @@ def retsinformation(
         str,
         typer.Option(
             "--items",
-            help="CSV of slash-form DK statute ids. Each must be downloaded already.",
+            help="CSV of accession numbers (e.g. 'A20180050229,B20260050805'). "
+            "Each must be downloaded via `clg ingest retsinformation --items ...` first.",
         ),
     ],
     explode_subparagraphs: Annotated[
@@ -199,19 +200,14 @@ def retsinformation(
             f"'DK' is not in enabled_jurisdictions={s.enabled_jurisdictions}"
         )
 
-    triples: list[tuple[str, int, int]] = []
-    for s_ in items.split(","):
-        parts = s_.strip().split("/")
-        if len(parts) != 3:
-            raise typer.BadParameter(
-                f"bad --items entry {s_!r}; want '<doc_type>/<year>/<num>'"
-            )
-        triples.append((parts[0], int(parts[1]), int(parts[2])))
+    accns = tuple(a.strip() for a in items.split(",") if a.strip())
+    if not accns:
+        raise typer.BadParameter("--items produced no accession numbers")
 
     store = get_store()
     store.verify()
     src = RetsinformationSource(
-        items=tuple(triples),
+        accns=accns,
         explode_subparagraphs=explode_subparagraphs,
     )
     ctx = IngestContext(store=store)
