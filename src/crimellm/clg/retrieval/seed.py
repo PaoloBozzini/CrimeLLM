@@ -87,6 +87,12 @@ def seed_from_chunks(
     )
     out: list[Candidate] = []
     for r in rows:
+        extras: dict[str, object] = {}
+        # Phase 14.1: surface Case.citations (Ufr alt-ids, parallel CELEX, …)
+        # so the synth prompt can render "U.2023.1234H, ECLI:DK:HR:2023:1234".
+        parent_citations = r.get("parent_citations") if isinstance(r, dict) else r["parent_citations"]
+        if parent_citations:
+            extras["citations"] = list(parent_citations)
         out.append(
             Candidate(
                 chunk_id=r["chunk_id"],
@@ -100,6 +106,7 @@ def seed_from_chunks(
                 decision_date=r["decision_date"],
                 source="seed",
                 base_score=float(r["score"]),
+                extras=extras,
             )
         )
     return out

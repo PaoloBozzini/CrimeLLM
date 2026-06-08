@@ -227,8 +227,18 @@ def parse_judgment_pdf(
     citations: list[str] | None = None,
     source_url: str | None = None,
     retrieved_at: date | None = None,
+    allow_ocr: bool = True,
 ) -> JudgmentParse:
-    """PDF wrapper. Extracts text via ``pypdf`` then delegates."""
+    """PDF wrapper. Extracts text via ``pypdf`` then delegates.
+
+    Modern domstol.dk judgments carry a selectable text layer. Older
+    ones are scans — ``pypdf`` returns empty pages. When that happens
+    and ``allow_ocr=True`` (default) we try ``ocrmypdf`` as a fallback,
+    rewriting the PDF in place with an embedded text layer and then
+    re-extracting. The OCR escalation is no-op when the ``[ocr]`` extra
+    isn't installed (``ocrmypdf`` import fails → we just return whatever
+    ``pypdf`` could extract, however little).
+    """
     try:
         from pypdf import PdfReader
     except ImportError as e:  # pragma: no cover — caller installs the extra
@@ -237,14 +247,24 @@ def parse_judgment_pdf(
             "(`uv sync --extra clg`) to parse domstol.dk PDFs."
         ) from e
 
-    reader = PdfReader(str(path))
-    pages: list[str] = []
-    for page in reader.pages:
-        try:
-            pages.append(page.extract_text() or "")
-        except Exception:  # noqa: BLE001 — some pages throw on encrypted/odd PDFs
-            pages.append("")
-    body = "\n\n".join(pages)
+    def _extract(pdf_path: Path | str) -> str:
+        reader = PdfReader(str(pdf_path))
+        pages: list[str] = []
+        for page in reader.pages:
+            try:
+                pages.append(page.extract_text() or "")
+            except Exception:  # noqa: BLE001 — encrypted / odd PDFs
+                pages.append("")
+        return "\n\n".join(pages)
+
+    body = _extract(path)
+
+    # Empty / near-empty extract on a non-trivial PDF → likely a scan.
+    # Escalate to OCR when the optional extra is installed.
+    if allow_ocr and len(body.strip()) < 40:
+        ocr_body = _try_ocr_fallback(path)
+        if ocr_body is not None:
+            body = ocr_body
 
     return parse_judgment_text(
         body,
@@ -256,6 +276,48 @@ def parse_judgment_pdf(
         source_url=source_url,
         retrieved_at=retrieved_at,
     )
+
+
+def _try_ocr_fallback(path: Path | str) -> str | None:
+    """Run ``ocrmypdf`` over ``path`` into a temp file + re-extract text.
+
+    Returns ``None`` when the optional ``ocrmypdf`` extra isn't installed
+    or the OCR pass fails — the caller falls back to whatever pypdf could
+    pull (often empty). Skeleton: production use should pin Tesseract
+    language data for DA (``ocrmypdf -l dan``) — wired below.
+    """
+    try:
+        import ocrmypdf  # type: ignore
+    except ImportError:
+        return None
+
+    import tempfile
+
+    from pypdf import PdfReader
+
+    src = Path(path)
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            out_path = Path(tmp.name)
+        ocrmypdf.ocr(
+            str(src),
+            str(out_path),
+            language="dan",
+            deskew=True,
+            skip_text=False,
+            force_ocr=True,
+            progress_bar=False,
+        )
+        reader = PdfReader(str(out_path))
+        pages: list[str] = []
+        for page in reader.pages:
+            try:
+                pages.append(page.extract_text() or "")
+            except Exception:  # noqa: BLE001
+                pages.append("")
+        return "\n\n".join(pages)
+    except Exception:  # noqa: BLE001 — OCR failures shouldn't crash ingest
+        return None
 
 
 def parse_judgment_file(path: Path | str, **kwargs: Any) -> JudgmentParse:

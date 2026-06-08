@@ -1,30 +1,34 @@
 """Multi-signal language detection.
 
-Lightweight DA vs EN binary classifier shared across the clg retrieval
-parser (Phase 7), the synthesis prompts (Phase 8), and any other caller
-that needs a single ``(lang, confidence)`` answer without dragging in a
-multi-megabyte language-id library.
+Lightweight 4-way classifier (DA / EN / FR / DE) shared across the clg
+retrieval parser (Phase 7), the synthesis prompts (Phase 8), and any
+other caller that needs a single ``(lang, confidence)`` answer without
+dragging in a multi-megabyte language-id library.
 
-**Four signals, weighted sum:**
+**Signals (weighted sum, per language):**
 
-1. **DA-only diacritics** (``æ/ø/å``) — heaviest weight (4.0). One hit
-   is decisive. These characters don't appear in EN in the Western
-   European context, so even a single occurrence is unambiguous evidence.
-2. **Stopword frequency** — top-40 lists per language; weighted by hit
-   ratio over total tokens. Asymmetric (no shared words) so a sentence
-   can't tie itself by accident.
-3. **Character bigrams** — DA-distinctive (``sk / ld / rk / rd / lv``)
-   vs EN-distinctive (``th / wh / qu / wr / kn / gh / ph / ck``).
-   Carries DA queries that have been diacritic-stripped (e.g. when the
-   author can't type ``æ`` quickly).
-4. **DA word-ending suffixes** — Danish inflections English doesn't
-   share (``-ende``, ``-else``, ``-heden``, ``-erne``).
+1. **Language-specific diacritics / characters** — heaviest weight
+   (4.0). One hit per language is decisive:
+   - DA: ``æ/ø/å`` (don't appear in EN/FR/DE in Western European text)
+   - FR: ``ç/œ`` (œ is uniquely FR; ç also Portuguese but rare in our
+     legal corpus)
+   - DE: ``ß`` (uniquely German; eszett doesn't appear elsewhere)
+   - EN: no language-only diacritics — earns its score from other signals
+2. **Stopword frequency** — top stopword lists per language, weighted by
+   hit ratio over total tokens. Disjoint across languages (Phase 7
+   asymmetry invariant) so a sentence can't tie itself by accident.
+3. **Character bigrams** — language-distinctive pairs
+   (``th`` for EN, ``sk`` for DA, ``ou`` for FR, ``sch`` trigram for DE
+   captured as ``sc`` + ``ch`` bigrams).
+4. **Word-ending suffixes** — language-specific inflections
+   (DA ``-ende``, FR ``-tion -ment -aux``, DE ``-ung -keit -lich``).
 
 Returns confidence as the normalised margin of winner over runner-up
-(``0.0`` = coin flip, ``1.0`` = unambiguous). Below ``_DA_MIN_CONFIDENCE``
-falls back to EN — Claude handles EN better than DA, and the DK firm's
-queries almost always carry strong DA signal when they're DA. EN is the
-safe default for everything else.
+(``0.0`` = coin flip, ``1.0`` = unambiguous). Below the per-language
+``_MIN_CONFIDENCE`` (default 0.15) falls back to **EN** — Claude handles
+EN better than DA/FR/DE, and queries with strong non-EN signal almost
+always carry decisive diacritics or stopword density. EN is the safe
+default for everything else.
 
 **Drop-in upgrade path:** for short-text accuracy beyond what hand-tuned
 heuristics give, swap in ``langdetect`` (CLD2 port) or ``langid.py`` —
@@ -76,6 +80,53 @@ EN_BIGRAMS: frozenset[str] = frozenset(
 # false hits on short EN words ("ben"/"den" etc.).
 DA_SUFFIXES: tuple[str, ...] = ("ende", "else", "heden", "erne", "et", "en", "er")
 
+
+# --- FR signals -----------------------------------------------------------
+
+# œ is uniquely French. ç also appears in Portuguese but rare in our
+# legal corpus — treating it as FR signal is acceptable noise.
+FR_ONLY_CHARS = frozenset("çœÇŒ")
+
+FR_STOPWORDS: frozenset[str] = frozenset(
+    [
+        "le", "la", "les", "un", "une", "des", "du", "de", "et", "ou",
+        "que", "qui", "dans", "pour", "par", "sur", "avec", "sans", "sous",
+        "ne", "pas", "ces", "cette", "ce", "cet", "aux", "au", "ses",
+        "son", "sa", "leur", "leurs", "est", "sont", "était", "été",
+        "doit", "peut", "selon", "alors", "lors", "ainsi", "donc",
+    ]
+)
+
+FR_BIGRAMS: frozenset[str] = frozenset(
+    ["qu", "ou", "ai", "eu", "oi", "tr", "br", "ch", "ll", "ée"]
+)
+
+FR_SUFFIXES: tuple[str, ...] = ("tion", "ment", "ique", "able", "aux", "ées", "iste")
+
+
+# --- DE signals -----------------------------------------------------------
+
+# ß is uniquely German. Umlauts (ä/ö/ü) appear in DA too — keep them out
+# of the "only" set and rely on stopwords + suffixes for disambiguation.
+DE_ONLY_CHARS = frozenset("ß")
+
+DE_STOPWORDS: frozenset[str] = frozenset(
+    [
+        "der", "die", "das", "und", "ist", "nicht", "ein", "eine", "auf",
+        "von", "mit", "im", "zu", "auch", "wenn", "als", "aber", "auch",
+        "dass", "wird", "war", "sein", "kann", "muss", "soll", "nach",
+        "über", "unter", "vor", "wegen", "durch", "ohne", "gegen",
+        "zwischen", "sowie", "bzw", "diese", "dieser", "dieses", "jeder",
+    ]
+)
+
+DE_BIGRAMS: frozenset[str] = frozenset(
+    ["sc", "ch", "ie", "ei", "au", "eu", "tz", "pf", "nd", "ng"]
+)
+
+DE_SUFFIXES: tuple[str, ...] = ("ung", "keit", "heit", "lich", "schaft", "lung", "isch")
+
+
 # Weights tuned on hand-built test corpus. Diacritics dominate when
 # present; stopwords + bigrams + suffixes share the remainder.
 _WEIGHT_DIACRITIC = 4.0
@@ -84,9 +135,10 @@ _WEIGHT_BIGRAM = 0.5
 _WEIGHT_SUFFIX = 0.7
 
 # Below this confidence margin we fall back to EN. EN is the safe default
-# because Claude handles EN better than DA and the DA firm's queries
-# almost always carry strong DA signal (legal-statute names, æ/ø/å).
-_DA_MIN_CONFIDENCE = 0.15
+# because Claude handles EN best and non-EN queries with real signal
+# almost always carry decisive diacritics or stopword density.
+_MIN_CONFIDENCE = 0.15
+_DA_MIN_CONFIDENCE = _MIN_CONFIDENCE  # back-compat alias
 
 
 def _tokenise(text: str) -> list[str]:
@@ -110,16 +162,63 @@ def _bigrams(text: str) -> list[str]:
     return [s[i : i + 2] for i in range(len(s) - 1)]
 
 
+def _tokenise_multi(text: str) -> list[str]:
+    """Like ``_tokenise`` but keeps æ/ø/å/ç/œ/ß/ä/ö/ü inside tokens."""
+    out: list[str] = []
+    buf: list[str] = []
+    extra = "æøåçœßäöü"
+    for ch in text.lower():
+        if ch.isalpha() or ch in extra:
+            buf.append(ch)
+        else:
+            if buf:
+                out.append("".join(buf))
+                buf = []
+    if buf:
+        out.append("".join(buf))
+    return out
+
+
+def _score_language(
+    text: str,
+    *,
+    diacritics: frozenset[str],
+    stopwords: frozenset[str],
+    bigrams_set: frozenset[str],
+    suffixes: tuple[str, ...],
+    tokens: list[str],
+    text_bigrams: list[str],
+) -> float:
+    """Compute the weighted score for one language."""
+    score = 0.0
+    if diacritics:
+        hits = sum(1 for ch in text if ch in diacritics)
+        if hits:
+            score += _WEIGHT_DIACRITIC * min(hits, 3)
+    if tokens:
+        sw_hits = sum(1 for tok in tokens if tok in stopwords)
+        score += _WEIGHT_STOPWORD * (sw_hits / len(tokens)) * 10
+    if text_bigrams:
+        bg_hits = sum(1 for b in text_bigrams if b in bigrams_set)
+        score += _WEIGHT_BIGRAM * (bg_hits / len(text_bigrams)) * 10
+    if tokens and suffixes:
+        suf_hits = sum(
+            1 for tok in tokens if len(tok) >= 4 and tok.endswith(suffixes)
+        )
+        score += _WEIGHT_SUFFIX * (suf_hits / len(tokens)) * 10
+    return score
+
+
 def detect_language(text: str) -> tuple[str, float]:
-    """Detect DA vs EN; return ``(language, confidence)``.
+    """Detect DA / EN / FR / DE; return ``(language, confidence)``.
 
-    ``language`` is an ISO 639-1 code (``"da"`` or ``"en"``).
-    ``confidence`` is the normalised margin of winner over runner-up
-    (``0.0`` = coin flip, ``1.0`` = unambiguous).
+    ``language`` is an ISO 639-1 code (``"da"`` / ``"en"`` / ``"fr"`` /
+    ``"de"``). ``confidence`` is the normalised margin of winner over
+    runner-up (``0.0`` = coin flip, ``1.0`` = unambiguous).
 
-    Below the internal ``_DA_MIN_CONFIDENCE`` threshold (default 0.15)
-    the result always defaults to ``"en"`` regardless of which side
-    scored higher — EN is the safer fallback for downstream synthesis.
+    Below the internal ``_MIN_CONFIDENCE`` threshold (default 0.15) the
+    result always defaults to ``"en"`` regardless of which side scored
+    higher — EN is the safer fallback for downstream synthesis.
 
     See module docstring for the full signal/weight design.
     """
@@ -127,44 +226,63 @@ def detect_language(text: str) -> tuple[str, float]:
     if len(text) < 3:
         return "en", 0.0
 
-    da_score = 0.0
-    en_score = 0.0
+    tokens = _tokenise_multi(text)
+    text_bigrams = _bigrams(text)
 
-    # 1. DA-only diacritics — one hit is strong evidence.
-    diacritic_hits = sum(1 for ch in text if ch in DA_ONLY_CHARS)
-    if diacritic_hits:
-        da_score += _WEIGHT_DIACRITIC * min(diacritic_hits, 3)
+    scores: dict[str, float] = {
+        "da": _score_language(
+            text,
+            diacritics=DA_ONLY_CHARS,
+            stopwords=DA_STOPWORDS,
+            bigrams_set=DA_BIGRAMS,
+            suffixes=DA_SUFFIXES,
+            tokens=tokens,
+            text_bigrams=text_bigrams,
+        ),
+        "en": _score_language(
+            text,
+            diacritics=frozenset(),  # no EN-only diacritics
+            stopwords=EN_STOPWORDS,
+            bigrams_set=EN_BIGRAMS,
+            suffixes=(),  # EN suffixes too varied to score reliably
+            tokens=tokens,
+            text_bigrams=text_bigrams,
+        ),
+        "fr": _score_language(
+            text,
+            diacritics=FR_ONLY_CHARS,
+            stopwords=FR_STOPWORDS,
+            bigrams_set=FR_BIGRAMS,
+            suffixes=FR_SUFFIXES,
+            tokens=tokens,
+            text_bigrams=text_bigrams,
+        ),
+        "de": _score_language(
+            text,
+            diacritics=DE_ONLY_CHARS,
+            stopwords=DE_STOPWORDS,
+            bigrams_set=DE_BIGRAMS,
+            suffixes=DE_SUFFIXES,
+            tokens=tokens,
+            text_bigrams=text_bigrams,
+        ),
+    }
 
-    # 2. Stopword frequency, normalised by total token count.
-    tokens = _tokenise(text)
-    if tokens:
-        da_hits = sum(1 for tok in tokens if tok in DA_STOPWORDS)
-        en_hits = sum(1 for tok in tokens if tok in EN_STOPWORDS)
-        da_score += _WEIGHT_STOPWORD * (da_hits / len(tokens)) * 10
-        en_score += _WEIGHT_STOPWORD * (en_hits / len(tokens)) * 10
-
-    # 3. Character bigrams.
-    bigrams = _bigrams(text)
-    if bigrams:
-        da_bg = sum(1 for b in bigrams if b in DA_BIGRAMS)
-        en_bg = sum(1 for b in bigrams if b in EN_BIGRAMS)
-        da_score += _WEIGHT_BIGRAM * (da_bg / len(bigrams)) * 10
-        en_score += _WEIGHT_BIGRAM * (en_bg / len(bigrams)) * 10
-
-    # 4. DA word-ending suffixes.
-    if tokens:
-        suffix_hits = sum(
-            1 for tok in tokens if len(tok) >= 4 and tok.endswith(DA_SUFFIXES)
-        )
-        da_score += _WEIGHT_SUFFIX * (suffix_hits / len(tokens)) * 10
-
-    total = da_score + en_score
+    total = sum(scores.values())
     if total <= 0:
         return "en", 0.0
-    margin = abs(da_score - en_score) / total
-    if da_score > en_score and margin >= _DA_MIN_CONFIDENCE:
-        return "da", margin
-    return "en", margin if en_score > da_score else 0.0
+
+    # Winner = argmax; confidence = margin of winner over best non-winner
+    # normalised by total. Below threshold → EN fallback.
+    winner = max(scores, key=lambda k: scores[k])
+    runner_up = max((v for k, v in scores.items() if k != winner), default=0.0)
+    margin = (scores[winner] - runner_up) / total
+
+    if winner == "en":
+        return "en", margin
+    if margin >= _MIN_CONFIDENCE:
+        return winner, margin
+    return "en", margin
 
 
 __all__ = ["detect_language"]

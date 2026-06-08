@@ -17,21 +17,25 @@ Wraps `httpx` for polite, resumable downloads against rate-limited public legal-
 
 Always available — no torch / no neo4j dependencies.
 
-### `language.py` — DA vs EN detection
+### `language.py` — 4-way language detection
 
-Multi-signal binary language classifier. Used by the clg query parser (synthesis-language routing) and any future caller that needs a single `(lang, confidence)` answer without dragging in a multi-megabyte language-id library.
+Multi-signal classifier across **DA / EN / FR / DE** (Phase 14.3 extended from the original Phase 7 binary detector). Used by the clg query parser (synthesis-language routing) and any future caller that needs a single `(lang, confidence)` answer without dragging in a multi-megabyte language-id library.
 
 | Symbol | Use |
 |---|---|
-| `detect_language(text) → (lang, confidence)` | DA / EN binary, pure stdlib. `lang` is ISO 639-1, `confidence` is the normalised margin in `[0.0, 1.0]`. Below an internal `_DA_MIN_CONFIDENCE` threshold (`0.15`) the result always defaults to `"en"` — Claude handles EN > DA, so EN is the safer fallback for downstream synthesis |
-| `DA_ONLY_CHARS`, `DA_STOPWORDS`, `EN_STOPWORDS`, `DA_BIGRAMS`, `EN_BIGRAMS`, `DA_SUFFIXES` | The four signal tables, exposed as `frozenset` / `tuple` so callers can audit / unit-test the inputs |
+| `detect_language(text) → (lang, confidence)` | Returns ISO 639-1 code in `{da, en, fr, de}` + normalised winner-over-runner-up margin in `[0.0, 1.0]`. Below `_MIN_CONFIDENCE` (`0.15`) defaults to `"en"` — Claude handles EN best and non-EN queries with real signal almost always carry decisive diacritics or stopword density |
+| `DA_ONLY_CHARS / DA_STOPWORDS / DA_BIGRAMS / DA_SUFFIXES` | DA signal tables (`æ/ø/å` + 40 stopwords + bigrams + inflection suffixes) |
+| `EN_STOPWORDS / EN_BIGRAMS` | EN signal tables (40 stopwords + Anglo-Saxon bigrams like `th/wh/qu`) |
+| `FR_ONLY_CHARS / FR_STOPWORDS / FR_BIGRAMS / FR_SUFFIXES` | FR signal tables (`ç/œ` + 40 stopwords + `-tion -ment -ique -able -aux` suffixes) |
+| `DE_ONLY_CHARS / DE_STOPWORDS / DE_BIGRAMS / DE_SUFFIXES` | DE signal tables (`ß` + 40 stopwords + `-ung -keit -heit -lich -schaft -lung -isch` suffixes) |
 
-**Four signals, weighted sum:**
+**Four signal types, weighted sum, scored per language; argmax wins:**
 
-1. **DA-only diacritics** (`æ/ø/å`) — heaviest weight (4.0). One hit is decisive.
-2. **Stopword frequency** — top-40 lists per language; weighted by hit ratio over total tokens. Lists are disjoint (asymmetric signal).
-3. **Character bigrams** — DA-distinctive (`sk / ld / rk / rd / lv`) vs EN-distinctive (`th / wh / qu / wr / kn / gh / ph / ck`).
-4. **DA word-ending suffixes** — Danish inflections English doesn't share (`-ende`, `-else`, `-heden`, `-erne`).
+1. **Language-specific diacritics** — heaviest weight (4.0). One hit is decisive.
+   - DA: `æ/ø/å` · FR: `ç/œ` · DE: `ß` · EN: (no language-only marks; relies on stopwords)
+2. **Stopword frequency** — top-40 list per language; weighted by hit ratio over total tokens. Lists are disjoint across all four languages so a sentence can't tie itself by accident.
+3. **Character bigrams** — language-distinctive pairs (DA: `sk/ld/rk/rd/lv`; EN: `th/wh/qu/wr/kn/gh/ph/ck`; FR: `qu/ou/ai/eu/oi`; DE: `sc/ch/ie/ei/tz/pf`).
+4. **Word-ending suffixes** — inflections the others don't share (DA: `-ende/-else/-heden`; FR: `-tion/-ment/-ique/-able/-aux`; DE: `-ung/-keit/-heit/-lich/-schaft/-lung/-isch`).
 
 **Drop-in upgrade path:** swap in `langdetect` (CLD2 port) or `langid.py` behind a shim that preserves the `(lang, confidence)` return contract — no caller changes needed.
 

@@ -167,6 +167,36 @@ _UK_PROV_RE = re.compile(
     r"^uk/(?P<act_type>[a-z]+)/(?P<year>\d{4})/(?P<num>\d+)/section/(?P<sec>[^@]+)@(?P<ver>.+)$"
 )
 
+# DK Ufr alt-id shape — Phase 1 cite_dk normalises to ``U.YYYY.NNNN.X``
+# where ``X`` is H/V/Ø/B (Højesteret / Vestre / Østre / Byret). When a
+# Case node carries this in ``Case.citations`` alongside its ECLI we
+# surface both forms in the prompt heading (Phase 14.1).
+_UFR_ALT_RE = re.compile(r"^U\.\d{4}\.\d{1,5}\.[HVØB]$")
+
+
+def _pretty_ufr(normalised: str) -> str:
+    """``U.2023.1234.H`` → ``U.2023.1234H`` (DA convention: no dot before court)."""
+    return normalised[:-2] + normalised[-1]
+
+
+def _pick_parallel_ufr(citations: Sequence[str] | None) -> str | None:
+    """Return the first Ufr-shaped alt-id in ``citations``, prettified.
+
+    Operators sometimes paste alt-ids in either the normalised
+    ``U.YYYY.NNNN.X`` form (Phase 1 cite_dk output) or the surface
+    ``U.YYYY.NNNNX`` form. Accept both.
+    """
+    if not citations:
+        return None
+    for c in citations:
+        s = (c or "").strip()
+        if _UFR_ALT_RE.match(s):
+            return _pretty_ufr(s)
+        # Surface form: U.2023.1234H — accept too.
+        if re.match(r"^U\.\d{4}\.\d{1,5}[HVØB]$", s):
+            return s
+    return None
+
 
 def _celex_form(celex: str) -> str:
     """``32016R0679`` → ``Reg (EU) 2016/679``; ``32019L0770`` → ``Dir (EU) 2019/770``."""
@@ -207,6 +237,7 @@ def format_human_citation(
     parent_name: str = "",
     section_path: str | None = None,
     language: str = "en",
+    citations: Sequence[str] | None = None,
 ) -> str:
     """Build a human-readable heading for the prompt context block.
 
@@ -214,6 +245,11 @@ def format_human_citation(
     function only enriches the surrounding prose so a reader sees a
     familiar form (``GDPR Art. 6``, ``Aftaleloven § 36``, …) instead of
     the raw slash-path twice.
+
+    ``citations`` is the optional alt-id list from ``Case.citations``;
+    when an ECLI:DK Case carries a parallel Ufr identifier
+    (``U.YYYY.NNNN.X``) in it, the heading surfaces both forms — the DA
+    convention DA lawyers actually read.
 
     Returns ``"<human prose> [parent_id]"`` or the bare id when no
     enrichment is recognised. Language affects DK / EU prose only; US /
@@ -261,9 +297,21 @@ def format_human_citation(
         label = _format_dk_instrument_label(m["doc_type"], m["year"], m["num"])
         return f"{label} {raw}"
 
-    # ECLI:DK / ECLI:EU case — ECLI is canonical, parent_name is the
-    # caption when present.
-    if parent_id.startswith(("ECLI:DK:", "ECLI:EU:")):
+    # ECLI:DK case — ECLI is canonical, parent_name is the caption when
+    # present, parallel Ufr alt-id surfaces alongside when ``citations``
+    # carries one (Phase 14.1 DA convention).
+    if parent_id.startswith("ECLI:DK:"):
+        ufr = _pick_parallel_ufr(citations)
+        parts: list[str] = []
+        if parent_name and parent_name != parent_id:
+            parts.append(parent_name)
+        if ufr:
+            parts.append(ufr)
+        parts.append(parent_id)
+        return ", ".join(parts) + f" {raw}" if parts else raw
+
+    # ECLI:EU case — ECLI is canonical, parent_name is the caption when present.
+    if parent_id.startswith("ECLI:EU:"):
         if parent_name and parent_name != parent_id:
             return f"{parent_name}, {parent_id} {raw}"
         return raw
@@ -300,6 +348,7 @@ def format_candidates_block(
             parent_name=c.parent_name,
             section_path=c.section_path,
             language=language,
+            citations=c.extras.get("citations") if hasattr(c, "extras") else None,
         )
         body = (c.text or "").strip()
         if len(body) > max_chars:

@@ -66,6 +66,11 @@ clg = [
     # DK case-law PDFs (domstol.dk) — Phase 5.
     "pypdf>=5.0",
 ]
+# OCR fallback for scanned domstol.dk PDFs (Phase 14.2). Requires the
+# system-level tesseract binary; ocrmypdf wraps it. Optional — the
+# parser tries pypdf first and only escalates to OCR when text extraction
+# yields empty pages and this extra is installed.
+ocr = ["ocrmypdf>=16.0"]
 # Convenience: everything (classifier + clg + zero-shot LLM extras).
 all = [
     "crimellm[classifier]",

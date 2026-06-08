@@ -469,7 +469,8 @@ def search_chunks(
                coalesce(parent.name, parent.short_title, parent.section_path) AS parent_name,
                parent.section_path AS section_path,
                parent.version_id AS version_id,
-               parent.decision_date AS decision_date
+               parent.decision_date AS decision_date,
+               parent.citations AS parent_citations
         ORDER BY score DESC
         """,
         k=k,
