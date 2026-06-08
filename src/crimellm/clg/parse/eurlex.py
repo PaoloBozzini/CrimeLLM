@@ -172,14 +172,27 @@ def parse_regulation(
     source_url: str | None = None,
     retrieved_at: date | None = None,
 ) -> RegulationParse:
-    """Parse one Akoma Ntoso regulation / directive XML body.
+    """Parse one Akoma Ntoso *or* FORMEX regulation / directive XML body.
 
     ``celex`` is the canonical EU id (e.g. ``32016R0679``). When omitted we
-    try to recover it from ``<FRBRalias name="CELEX"/>``. ``language`` is
-    the ISO 639-1 code of the body's content language; stored on
+    try to recover it from ``<FRBRalias name="CELEX"/>`` (AKN). ``language``
+    is the ISO 639-1 code of the body's content language; stored on
     ``Provenance`` for audit.
+
+    Dispatch is by root element: ``<akomaNtoso>`` → AKN path (legacy
+    fixtures, EU AKN exports); ``<ACT>`` → FORMEX path (CELLAR default
+    serialisation for current legislation).
     """
     root = etree.fromstring(xml_bytes)
+
+    if root.tag == "ACT" or etree.QName(root).localname == "ACT":
+        return _parse_formex_act(
+            root,
+            celex=celex,
+            language=language,
+            source_url=source_url,
+            retrieved_at=retrieved_at,
+        )
 
     celex = celex or _frbr_alias(root, "CELEX") or ""
     if not celex:
@@ -260,6 +273,116 @@ def parse_regulation(
     return RegulationParse(instrument=instrument, provisions=provisions, cites_celex=cites)
 
 
+def _parse_formex_act(
+    root: etree._Element,
+    *,
+    celex: str | None,
+    language: str,
+    source_url: str | None,
+    retrieved_at: date | None,
+) -> RegulationParse:
+    """Parse a FORMEX ``<ACT>`` body (CELLAR ``application/xml;type=fmx4``).
+
+    FORMEX shape used by current EUR-Lex legislation:
+
+        <ACT>
+          <BIB.INSTANCE><DATE ISO="YYYYMMDD"/>...</BIB.INSTANCE>
+          <TITLE>... display title (multi-line) ...</TITLE>
+          <PREAMBLE>... visa / recitals ...</PREAMBLE>
+          <ENACTING.TERMS>
+            <DIVISION>... chapters/sections ...
+              <ARTICLE IDENTIFIER="001">
+                <TI.ART>Article 1</TI.ART>
+                <STI.ART>Subject-matter</STI.ART>
+                <PARAG IDENTIFIER="001.001"><NO.PARAG>1.</NO.PARAG><ALINEA>...</ALINEA></PARAG>
+                ...
+              </ARTICLE>
+            </DIVISION>
+          </ENACTING.TERMS>
+          <FINAL>...</FINAL>
+        </ACT>
+
+    FORMEX has no CELEX in metadata — callers must pass ``celex`` (the
+    ingester knows it; the SPA URL embeds it). CELEX cross-references
+    inside the preamble are by surface form ("Directive 95/46/EC"), not
+    canonical id, so the IMPLEMENTS-seed list is left empty here; DK lbk
+    preambles already carry resolved CELEX via ``extract_eu_celex_refs``.
+    """
+    if not celex:
+        raise ValueError(
+            "FORMEX <ACT> has no CELEX metadata — pass celex= explicitly"
+        )
+
+    iso = ""
+    date_el = next(iter(root.xpath(".//BIB.INSTANCE/DATE")), None)
+    if date_el is not None:
+        iso = (date_el.get("ISO") or "").strip()
+    adoption = (
+        datetime.strptime(iso, "%Y%m%d").date() if len(iso) == 8 and iso.isdigit() else None
+    )
+    year = adoption.year if adoption else None
+
+    title_el = next(iter(root.xpath("./TITLE")), None)
+    title = _ws(_itertext(title_el)) if title_el is not None else celex
+
+    iid = instrument_id_from_celex(celex)
+    prov = Provenance(
+        source="eur-lex",
+        source_url=source_url or f"{CELLAR_BASE}/{celex}",
+        retrieved_at=retrieved_at or date.today(),
+        source_id=f"{celex}@{language}",
+    )
+    instrument = Instrument(
+        id=iid,
+        jurisdiction="EU",
+        short_title=title or celex,
+        year=year,
+        provenance=[prov],
+    )
+
+    provisions: list[Provision] = []
+    for art in root.xpath(".//ARTICLE"):
+        ti_el = next(iter(art.xpath("./TI.ART")), None)
+        sti_el = next(iter(art.xpath("./STI.ART")), None)
+        num = _itertext(ti_el) if ti_el is not None else ""
+        heading = _itertext(sti_el) if sti_el is not None else ""
+        if not num:
+            continue
+        article_path = _article_path(num)
+        body_parts: list[str] = []
+        for child in art:
+            if not isinstance(child.tag, str):
+                continue  # processing instruction / comment
+            if child.tag in {"TI.ART", "STI.ART"}:
+                continue
+            body_parts.append(_itertext(child))
+        body_text = _ws(" ".join(p for p in body_parts if p))
+        display_head = f"{article_path} — {heading}" if heading else article_path
+        text = f"{display_head}\n\n{body_text}".strip() if body_text else display_head
+        provisions.append(
+            Provision(
+                id=provision_id(celex, article_path),
+                instrument_id=iid,
+                jurisdiction="EU",
+                section_path=article_path,
+                text=text,
+                valid_from=adoption,
+                valid_to=None,
+                version_id=language,
+            )
+        )
+
+    cites: list[str] = []
+    seen: set[str] = set()
+    for el in root.xpath(".//PREAMBLE | .//NOTE"):
+        for hit in _CELEX_RE.findall(_itertext(el)):
+            if hit != celex and hit not in seen:
+                seen.add(hit)
+                cites.append(hit)
+
+    return RegulationParse(instrument=instrument, provisions=provisions, cites_celex=cites)
+
+
 def _article_path(num_text: str) -> str:
     """``Article 6`` / ``Article 6(1)`` → ``art.6`` / ``art.6(1)``."""
     cleaned = re.sub(r"^(article|art\.?)\s*", "", num_text, flags=re.IGNORECASE).strip()
@@ -303,14 +426,27 @@ def parse_judgment(
     source_url: str | None = None,
     retrieved_at: date | None = None,
 ) -> JudgmentParse:
-    """Parse one Akoma Ntoso judgment XML body.
+    """Parse one Akoma Ntoso *or* FORMEX judgment XML body.
 
-    ``ecli`` defaults to the ``<FRBRalias name="ECLI"/>`` value. ``celex``
-    likewise from the alias block. ``court_id`` is the slug for the
-    Court node (``cjeu`` for the Court of Justice; ``gc`` for the General
-    Court when we add it).
+    AKN: ``ecli`` defaults to ``<FRBRalias name="ECLI"/>``; ``celex``
+    likewise. FORMEX: ECLI lives at ``<BIB.JUDGMENT>/<NO.ECLI ECLI="...">``
+    and CELEX at ``<BIB.JUDGMENT>/<NO.CELEX>``.
+
+    ``court_id`` is the slug for the Court node (``cjeu`` for the Court
+    of Justice; ``gc`` for the General Court when we add it).
     """
     root = etree.fromstring(xml_bytes)
+
+    if root.tag == "JUDGMENT" or etree.QName(root).localname == "JUDGMENT":
+        return _parse_formex_judgment(
+            root,
+            ecli=ecli,
+            celex=celex,
+            court_id=court_id,
+            language=language,
+            source_url=source_url,
+            retrieved_at=retrieved_at,
+        )
 
     ecli = ecli or _frbr_alias(root, "ECLI") or ""
     celex = celex or _frbr_alias(root, "CELEX") or ""
@@ -347,6 +483,110 @@ def parse_judgment(
     body_text = _itertext(body) if body is not None else ""
 
     haystack = body_text
+    ecli_hits: list[str] = []
+    seen_e: set[str] = set()
+    for hit in _ECLI_RE.findall(haystack):
+        if hit != ecli and hit not in seen_e:
+            seen_e.add(hit)
+            ecli_hits.append(hit)
+    celex_hits: list[str] = []
+    seen_c: set[str] = set()
+    for hit in _CELEX_RE.findall(haystack):
+        if hit != celex and hit not in seen_c:
+            seen_c.add(hit)
+            celex_hits.append(hit)
+
+    return JudgmentParse(
+        case=case,
+        body_text=body_text,
+        cites_ecli=ecli_hits,
+        cites_celex=celex_hits,
+    )
+
+
+def _parse_formex_judgment(
+    root: etree._Element,
+    *,
+    ecli: str | None,
+    celex: str | None,
+    court_id: str,
+    language: str,
+    source_url: str | None,
+    retrieved_at: date | None,
+) -> JudgmentParse:
+    """Parse a FORMEX ``<JUDGMENT>`` body.
+
+    Shape (formex-05.55):
+
+        <JUDGMENT>
+          <BIB.JUDGMENT>
+            <NO.CELEX>62012CJ0131</NO.CELEX>
+            <NO.ECLI ECLI="ECLI:EU:C:2014:317">EU:C:2014:317</NO.ECLI>
+            <DATE.JUDGMENT ISO="YYYYMMDD"/>
+            ...
+          </BIB.JUDGMENT>
+          <TITLE>... display title ...</TITLE>
+          <CONTENTS.JUDGMENT>... body ...</CONTENTS.JUDGMENT>
+        </JUDGMENT>
+    """
+    bib = next(iter(root.xpath("./BIB.JUDGMENT")), None)
+
+    def _bib_text(local: str) -> str:
+        el = next(iter(root.xpath(f"./BIB.JUDGMENT/{local}")), None)
+        return _itertext(el) if el is not None else ""
+
+    if ecli is None:
+        ecli_el = next(iter(root.xpath("./BIB.JUDGMENT/NO.ECLI")), None)
+        if ecli_el is not None:
+            attr = (ecli_el.get("ECLI") or "").strip()
+            ecli = attr or f"ECLI:{_itertext(ecli_el)}" if _itertext(ecli_el) else ""
+    if not ecli:
+        raise ValueError("ECLI not provided and not present in <BIB.JUDGMENT>")
+
+    celex = celex or _bib_text("NO.CELEX") or ""
+
+    # Judgment date lives outside BIB.JUDGMENT in real FORMEX — the first
+    # <DATE ISO="..."/> in document order (CURR.TITLE > PAGE.HEADER > DATE,
+    # or TITLE/TI/DATE) is the decision date.
+    iso = ""
+    for d_el in root.iter("DATE"):
+        candidate = (d_el.get("ISO") or "").strip()
+        if len(candidate) == 8 and candidate.isdigit():
+            iso = candidate
+            break
+    decision_date = (
+        datetime.strptime(iso, "%Y%m%d").date() if iso else None
+    )
+
+    title_el = next(iter(root.xpath("./TITLE")), None)
+    title = _ws(_itertext(title_el)) if title_el is not None else ""
+
+    prov = Provenance(
+        source="eur-lex",
+        source_url=source_url
+        or (f"{CELLAR_BASE}/{celex}" if celex else f"{EURLEX_BASE}/legal-content/{ecli}"),
+        retrieved_at=retrieved_at or date.today(),
+        source_id=f"{ecli}@{language}",
+    )
+
+    citations_alt = [celex] if celex else []
+    case = Case(
+        id=case_id_from_ecli(ecli),
+        jurisdiction="EU",
+        court_id=court_id,
+        name=title or ecli,
+        decision_date=decision_date,
+        citations=citations_alt,
+        provenance=[prov],
+    )
+
+    contents = next(iter(root.xpath("./CONTENTS.JUDGMENT")), None)
+    body_text = _itertext(contents) if contents is not None else ""
+
+    haystack = body_text
+    if bib is not None:
+        haystack = f"{_itertext(bib)} {haystack}"
+
     ecli_hits: list[str] = []
     seen_e: set[str] = set()
     for hit in _ECLI_RE.findall(haystack):
