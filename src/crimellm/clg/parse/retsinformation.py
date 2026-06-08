@@ -66,21 +66,35 @@ RETSINFO_NS = "https://www.retsinformation.dk/ns/dokument"
 
 # --- EU-directive ↔ CELEX helpers -----------------------------------------
 
-# DK preambles cite EU acts in many surface forms. The common ones we
-# convert to CELEX:
-#   "direktiv 2019/770"                         → 32019L0770
-#   "Europa-Parlamentets og Rådets direktiv 95/46/EF" → 31995L0046
-#   "forordning (EU) 2016/679"                  → 32016R0679
-#   "forordning (EF) nr. 45/2001"               → 32001R0045
-#   "Rådets forordning (EU) 2016/679"           → 32016R0679
+# DK preambles cite EU acts in two surface conventions for REGULATIONS
+# (the slash-separated digit order FLIPS depending on whether ``nr.`` is
+# present); for DIRECTIVES the year is always first even in legacy form.
+#
+#   Regulation modern (no nr.): YEAR/NUM  →  "forordning (EU) 2016/679"  → 32016R0679
+#   Regulation legacy (with nr.): NUM/YEAR → "forordning (EF) nr. 765/2008" → 32008R0765
+#                                            "forordning (EØF) nr. 339/93"  → 31993R0339
+#
+#   Directive any form: YEAR/NUM            →  "direktiv 2019/770"          → 32019L0770
+#                                              "direktiv 95/46/EF"          → 31995L0046
+#                                              "direktiv (EØF) nr. 76/207"  → 31976L0207
+#
+# Regulation legacy must match before regulation modern, otherwise modern
+# would mis-claim the span with the wrong orientation.
 _DK_DIRECTIVE_RE = re.compile(
-    r"\bdirektiv\s+(?:\(?(?:EU|EF|EØF)\)?\s+(?:nr\.?\s+)?)?(?P<year>\d{2,4})/(?P<num>\d{1,5})(?:/(?:EU|EF|EØF))?\b",
+    r"\bdirektiv(?:et)?\s+(?:\(?(?:EU|EF|EØF)\)?\s+)?(?:nr\.?\s+)?(?P<year>\d{2,4})/(?P<num>\d{1,5})(?:/(?:EU|EF|EØF))?\b",
     re.IGNORECASE,
 )
-_DK_REGULATION_RE = re.compile(
-    r"\bforordning\s+\(?(?:EU|EF|EØF)?\)?\s+(?:nr\.?\s+)?(?P<year>\d{2,4})/(?P<num>\d{1,5})\b",
+_DK_REGULATION_LEGACY_RE = re.compile(
+    r"\bforordning(?:en)?\s+\(?(?:EU|EF|EØF)\)?\s+nr\.?\s+(?P<num>\d{1,5})/(?P<year>\d{2,4})\b",
     re.IGNORECASE,
 )
+_DK_REGULATION_MODERN_RE = re.compile(
+    r"\bforordning(?:en)?\s+(?:\(?(?:EU|EF|EØF)\)?\s+)?(?P<year>\d{2,4})/(?P<num>\d{1,5})\b",
+    re.IGNORECASE,
+)
+# Back-compat alias (some tests / call sites import this directly).
+_DK_REGULATION_RE = _DK_REGULATION_MODERN_RE
+
 # Already-canonical CELEX (e.g. when the preamble lists footnote ids).
 _RAW_CELEX_RE = re.compile(r"\b[1-9]\d{4}[A-Z]{1,2}\d{4}\b")
 
@@ -105,26 +119,39 @@ def regulation_to_celex(year: str, num: str) -> str:
 def extract_eu_celex_refs(text: str) -> list[str]:
     """Pull DK-style EU references out of free text, return CELEX list.
 
-    Document-order, deduped. Includes already-canonical CELEX surface forms
-    so an operator pasting "32019L0770" into a preamble gets picked up.
+    Document-order, deduped. Legacy ``nr.`` forms (num/year) are matched
+    first so the modern (year/num) regex doesn't claim the same span with
+    the wrong orientation. Includes already-canonical CELEX surface forms
+    so an operator pasting ``"32019L0770"`` into a preamble gets picked up.
     """
-    seen: set[str] = set()
+    seen_celex: set[str] = set()
+    claimed_spans: list[tuple[int, int]] = []
     hits: list[tuple[int, str]] = []
+
+    def _span_taken(start: int, end: int) -> bool:
+        return any(s <= start < e or s < end <= e for s, e in claimed_spans)
+
+    def _record(match: re.Match[str], celex: str) -> None:
+        s, e = match.span()
+        if celex in seen_celex or _span_taken(s, e):
+            return
+        seen_celex.add(celex)
+        claimed_spans.append((s, e))
+        hits.append((s, celex))
+
+    # Regulations: legacy (num/year) first so its `nr.` cue locks the span
+    # before the modern (year/num) regex would mis-claim it.
+    for m in _DK_REGULATION_LEGACY_RE.finditer(text):
+        _record(m, regulation_to_celex(m["year"], m["num"]))
+    for m in _DK_REGULATION_MODERN_RE.finditer(text):
+        _record(m, regulation_to_celex(m["year"], m["num"]))
+    # Directives: year/num regardless of legacy/modern form.
     for m in _DK_DIRECTIVE_RE.finditer(text):
-        c = directive_to_celex(m["year"], m["num"])
-        if c not in seen:
-            seen.add(c)
-            hits.append((m.start(), c))
-    for m in _DK_REGULATION_RE.finditer(text):
-        c = regulation_to_celex(m["year"], m["num"])
-        if c not in seen:
-            seen.add(c)
-            hits.append((m.start(), c))
+        _record(m, directive_to_celex(m["year"], m["num"]))
+    # Raw CELEX strings (footnote ids).
     for m in _RAW_CELEX_RE.finditer(text):
-        c = m.group(0)
-        if c not in seen:
-            seen.add(c)
-            hits.append((m.start(), c))
+        _record(m, m.group(0))
+
     hits.sort(key=lambda t: t[0])
     return [c for _, c in hits]
 
