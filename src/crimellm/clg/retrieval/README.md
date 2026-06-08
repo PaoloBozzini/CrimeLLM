@@ -13,7 +13,7 @@ parse_query → seed (vector) → expand (graph) → good_law → rerank → syn
 | File | Stage | Purpose |
 |---|---|---|
 | `parse_query.py` | parse | `Query(raw, jurisdiction, as_of, language, language_confidence)` from CLI / API input. 4-way jurisdiction inference (US / UK / EU / DK) via per-jurisdiction cue tables; ties or zero-hit → `None`. Multi-signal DA/EN language detector (diacritics + stopwords + bigrams + suffixes — pure stdlib). Inferred jurisdictions not in `settings.enabled_jurisdictions` get cleared to `None` (operator overrides bypass) |
-| `seed.py` | seed | `seed_from_chunks(query)` — vector search against the `Chunk` index, returns `Candidate` seeds |
+| `seed.py` | seed | `seed_from_chunks(query)` — vector search against the `Chunk` index, returns `Candidate` seeds. Auto-scopes to `Settings.enabled_jurisdictions` when no explicit jurisdiction override is set; caller-knows-best `--jurisdiction X` bypasses the filter so a disabled jurisdiction is still reachable on demand without re-ingesting |
 | `expand.py` | expand | `expand_seeds(seeds)` — traverse `CITES` (forward + backward), `INTERPRETS` (Provision↔Case), pick the temporally correct Provision version |
 | `good_law.py` | filter | `check_good_law(case)` → `GoodLawFlag` (`GOOD` / `OVERRULED` / `REVERSED` / `UNKNOWN`); reads treatment edges produced by [`clg.link`](../link/README.md) |
 | `rerank.py` | rerank | `rerank(candidates, query)` — combine embedding score, citation centrality, recency |

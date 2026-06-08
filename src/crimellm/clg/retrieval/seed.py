@@ -55,13 +55,34 @@ def seed_from_chunks(
     *,
     k: int = 8,
     store: Neo4jStore | None = None,
+    enabled_jurisdictions: list[str] | None = None,
 ) -> list[Candidate]:
-    """Run vector search → ``Candidate`` list, filtered by jurisdiction."""
+    """Run vector search → ``Candidate`` list, filtered by jurisdiction.
+
+    When ``query.jurisdiction`` is set (CLI override or strong inference),
+    the search is scoped to that one jurisdiction. Otherwise the search
+    is scoped to ``enabled_jurisdictions`` (defaults to
+    ``Settings.enabled_jurisdictions``). Pass ``["ALL"]`` or an empty list
+    to disable the enabled-set filter — useful for admin/debug paths.
+    """
     qvec = embedder.embed(query.raw)
+    if enabled_jurisdictions is None:
+        from ..config import get_settings
+
+        enabled_jurisdictions = list(get_settings().enabled_jurisdictions)
+    # Sentinel: empty list / ["ALL"] / ["*"] → disable enabled filter.
+    if not enabled_jurisdictions or any(
+        c.strip().upper() in {"ALL", "*"} for c in enabled_jurisdictions
+    ):
+        enabled_for_search: list[str] | None = None
+    else:
+        enabled_for_search = enabled_jurisdictions
+
     rows = search_chunks(
         qvec,
         k=k,
         jurisdiction=query.jurisdiction,
+        enabled_jurisdictions=enabled_for_search,
         store=store,
     )
     out: list[Candidate] = []

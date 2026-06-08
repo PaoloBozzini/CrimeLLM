@@ -407,6 +407,7 @@ def search_chunks(
     *,
     k: int = 5,
     jurisdiction: str | None = None,
+    enabled_jurisdictions: Sequence[str] | None = None,
     parent_type: str | None = None,
     store: Neo4jStore | None = None,
 ) -> list[dict[str, Any]]:
@@ -416,8 +417,15 @@ def search_chunks(
     ``parent_type``, ``parent_id``, ``parent_name``, ``parent_jurisdiction``,
     and (for Provision parents) ``section_path`` + ``version_id``.
 
-    Optional filters keep retrieval honest:
+    Filters keep retrieval honest:
       * ``jurisdiction`` — drop hits whose parent isn't in that jurisdiction.
+        Caller-knows-best: bypasses ``enabled_jurisdictions``.
+      * ``enabled_jurisdictions`` — when ``jurisdiction`` is ``None``, scope
+        hits to ``parent.jurisdiction IN <list>``. Wired by
+        ``retrieval.seed_from_chunks`` from ``Settings.enabled_jurisdictions``
+        so a disabled jurisdiction returns zero hits without deleting any
+        data. Pass ``None`` to disable this filter entirely (admin / cross-
+        jurisdiction debug paths).
       * ``parent_type`` — restrict to ``Case`` or ``Provision``.
 
     Raises ``ValueError`` up front when the query vector's dimension does
@@ -434,6 +442,11 @@ def search_chunks(
             "all-MiniLM-L6-v2 at 384-dim), or run "
             "`clg graph rebuild-vector-index --dim <N>` to retarget the index."
         )
+    enabled_list: list[str] | None = (
+        [str(j).upper() for j in enabled_jurisdictions]
+        if enabled_jurisdictions
+        else None
+    )
     rows = store.run(
         """
         CALL db.index.vector.queryNodes('chunk_embedding', $k, $vec)
@@ -442,6 +455,11 @@ def search_chunks(
         WITH node, score, parent, labels(parent) AS lbls
         WHERE ($parent_type IS NULL OR $parent_type IN lbls)
           AND ($jurisdiction IS NULL OR parent.jurisdiction = $jurisdiction)
+          AND (
+                $jurisdiction IS NOT NULL
+             OR $enabled IS NULL
+             OR parent.jurisdiction IN $enabled
+          )
         RETURN node.id AS chunk_id,
                score,
                node.text AS text,
@@ -458,6 +476,7 @@ def search_chunks(
         vec=list(query_vector),
         parent_type=parent_type,
         jurisdiction=jurisdiction,
+        enabled=enabled_list,
     )
     return rows
 

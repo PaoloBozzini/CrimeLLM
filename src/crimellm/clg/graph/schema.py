@@ -84,9 +84,26 @@ JURISDICTION_SEEDS = [
 
 
 def apply_schema(store: Neo4jStore | None = None) -> dict[str, int]:
+    """Apply constraints + indexes + vector index + jurisdiction seeds.
+
+    Idempotent under re-runs. Jurisdiction seeds respect
+    ``Settings.enabled_jurisdictions``: only enabled codes are MERGEd, but
+    previously-seeded disabled codes are **not** deleted — flipping a
+    jurisdiction off and re-running ``clg graph init`` preserves any data
+    already loaded under that code. Use ``clg graph wipe-jurisdiction``
+    (or hand-run DETACH DELETE) to remove disabled-jurisdiction data
+    explicitly when that's actually what the operator wants.
+    """
     store = store or get_store()
     settings = store.settings
-    counts = {"constraints": 0, "indexes": 0, "vector_index": 0, "jurisdictions": 0}
+    enabled = {j.upper() for j in settings.enabled_jurisdictions}
+    counts = {
+        "constraints": 0,
+        "indexes": 0,
+        "vector_index": 0,
+        "jurisdictions": 0,
+        "jurisdictions_skipped": 0,
+    }
     with store.session() as s:
         for stmt in CONSTRAINTS:
             s.run(stmt)
@@ -97,6 +114,9 @@ def apply_schema(store: Neo4jStore | None = None) -> dict[str, int]:
         s.run(_vector_index_cypher(settings.embedding_dim), dim=settings.embedding_dim)
         counts["vector_index"] = 1
         for j in JURISDICTION_SEEDS:
+            if j["code"].upper() not in enabled:
+                counts["jurisdictions_skipped"] += 1
+                continue
             s.run(
                 "MERGE (j:Jurisdiction {code: $code}) SET j.name = $name",
                 code=j["code"],

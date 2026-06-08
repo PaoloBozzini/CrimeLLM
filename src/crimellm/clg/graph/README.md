@@ -7,8 +7,8 @@ Thin Neo4j backend. Isolates every Cypher write behind a small surface so the st
 | File | Purpose |
 |---|---|
 | `driver.py` | `Neo4jStore` wrapping `neo4j.Driver`; `get_store()` singleton; `.connect()`, `.verify()`, `.session()`, `.run(cypher, **params)` |
-| `schema.py` | `apply_schema()` — idempotent constraints (8), indexes (6), vector index on `Chunk.embedding`, jurisdiction seed nodes. `rebuild_vector_index(dim, drop_chunks=bool)` for embedder swaps. `drop_schema()` removes constraints/indexes (data untouched) |
-| `loaders.py` | Batched `UNWIND MERGE` writers: `load_courts`, `load_cases`, `load_citations`, `load_chunks`, `load_instruments`, `load_provisions`, `load_interprets` (Case→Provision), `load_implements` (Case→Instrument). All idempotent; flatten provenance into entity nodes |
+| `schema.py` | `apply_schema()` — idempotent constraints (8), indexes (6), vector index on `Chunk.embedding`, jurisdiction seed nodes. **Seeds only jurisdictions present in `Settings.enabled_jurisdictions`**; never deletes disabled-jurisdiction nodes (operator opt-in required). `rebuild_vector_index(dim, drop_chunks=bool)` for embedder swaps. `drop_schema()` removes constraints/indexes (data untouched) |
+| `loaders.py` | Batched `UNWIND MERGE` writers: `load_courts`, `load_cases`, `load_citations`, `load_chunks`, `load_instruments`, `load_provisions`, `load_interprets` (Case→Provision), `load_implements` (Instrument→Instrument). All idempotent; flatten provenance into entity nodes. `search_chunks` accepts `enabled_jurisdictions` to silence disabled jurisdictions at the retrieval boundary while preserving data |
 
 ## When to use
 
