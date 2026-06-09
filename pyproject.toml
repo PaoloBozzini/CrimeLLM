@@ -4,7 +4,8 @@ version = "0.2.0"
 description = "3-class crime classifier (fine-tune + zero-shot LLM) with RAG over US/UK statutes and case law."
 requires-python = ">=3.10,<3.13"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "LICENSE.MIT-pre-relicense", "NOTICE"]
 authors = [{ name = "Paolo Bozzini" }]
 dependencies = [
     # Lean default install. Enough to run the clg graph pipeline + core utils.

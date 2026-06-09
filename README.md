@@ -226,6 +226,17 @@ clg eval
 
 ## License
 
-MIT — see `LICENSE`.
+**AGPL-3.0-or-later** — see `LICENSE` and `NOTICE`. If you run a modified
+version of this code as a network-accessible service, AGPL §13 requires
+you to make the corresponding modified source available to your users.
 
-Source corpora retain their own licences: US Code is public domain (OLRC), UK legislation is Open Government Licence v3.0, CourtListener opinions are CC0 / public domain.
+Commits up to and including `50435ee` (and every GitHub release before
+the relicense commit) remain under the MIT License — see
+`LICENSE.MIT-pre-relicense`. Forks of those revisions are unaffected.
+
+A separate commercial licence is available for deployments where the
+AGPL is unworkable, and for access to the proprietary jurisdiction
+packs, prompt library, and firm-tuned gold sets that are **not**
+shipped in this repository. Contact paulbozzini16@gmail.com.
+
+Source corpora retain their own licences: US Code is public domain (OLRC), UK legislation is Open Government Licence v3.0, CourtListener opinions are CC0 / public domain. See `NOTICE` for the full list.

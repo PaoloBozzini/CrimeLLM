@@ -36,3 +36,9 @@ data/cache/*
 
 !data/eval/
 !data/eval/**
+
+# Proprietary gold sets / firm-specific eval data — kept out of the public
+# repo by convention. Public `data/eval/seed.yaml` stays in.
+data/eval/private/
+data/eval/firm_*
+data/eval/*.private.*

@@ -1,0 +1,60 @@
+CrimeLLM — licensing notice
+============================
+
+Copyright (c) 2026 Paolo Bozzini.
+
+This project contains components under different licenses. Read this
+notice before redistributing, hosting, or building a derivative service.
+
+1. Source code  (everything under `src/`, `tests/`, `notebooks/`, plus
+   build files, scripts, and developer documentation in this repo)
+   ------------------------------------------------------------------
+   Licensed under the GNU Affero General Public License v3.0 — see
+   `LICENSE`. If you run a modified version of this code as a network
+   service, AGPL §13 requires you to make the corresponding modified
+   source available to your users.
+
+   Commits up to and including SHA
+   `50435eea7bee8bb912d22ce934eda6bb704959fe` and all earlier GitHub
+   releases remain under the MIT License — see
+   `LICENSE.MIT-pre-relicense`. Forks of those revisions are unaffected
+   by the AGPL relicense.
+
+2. Curated data, prompts, and evaluation sets
+   ------------------------------------------
+   The contents of `data/eval/seed.yaml` (the public Phase 6 / Phase 10
+   seed gold set) are released under the same AGPL-3.0 terms as the
+   code, solely so the open test gate can run on a fresh checkout.
+
+   Any other contents under `data/eval/private/`, `data/eval/firm_*`,
+   `data/corpora/*`, or proprietary prompt overrides shipped alongside
+   a commercial deployment are **not** covered by this repository's
+   open-source license. They are proprietary to Paolo Bozzini and
+   licensed separately under the applicable commercial agreement.
+   `.gitignore` excludes these paths from this public repository by
+   design.
+
+3. Third-party source corpora
+   ---------------------------
+   When you run the ingest pipelines you download primary legal
+   material from the following sources, each retaining its own terms:
+
+     * U.S. Code (govinfo.gov / OLRC)        — public domain
+     * U.S. case law (CourtListener / CAP)   — CC0 / public domain
+     * UK legislation (legislation.gov.uk)   — Open Government Licence v3.0
+     * EU law (EUR-Lex)                      — Commission Decision 2011/833/EU
+     * Danish law (Retsinformation)          — public sector information
+     * The National Archives (Find Case Law) — Open Justice Licence
+       (reading) / free computational analysis licence (bulk + enrichment)
+
+   See `README.md` and `docs/` for the rate limits and licence prompts
+   each downloader enforces. Nothing in this NOTICE overrides those
+   upstream terms.
+
+4. Commercial licensing
+   --------------------
+   If the AGPL is incompatible with your deployment (for example, you
+   want to offer a hosted service without releasing your modifications,
+   or you want access to the proprietary jurisdiction packs / prompt
+   library / firm-tuned gold sets), a commercial licence is available.
+   Contact paulbozzini16@gmail.com.
