@@ -74,3 +74,31 @@ def register_rule(pattern: str | re.Pattern[str], source: str) -> None:
 def rules() -> Iterable[tuple[str, str]]:
     """Snapshot the active dispatch table — ``(pattern, source)`` pairs."""
     return tuple((r.pattern.pattern, r.source) for r in _RULES)
+
+
+# Substring-scan patterns (unanchored) for shapes the per-jurisdiction
+# citation parsers don't cover: ELI slash-forms (DK/EU/UK), CourtListener
+# opinion handles. Used by ``retrieval/parse_query.py`` to find canonical
+# ids in user question text that the link-layer parsers would otherwise
+# miss because they target prose-shaped citations.
+_SCAN_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\beli/(?:lov|lbk|bek|cir)/\d{4}/\d+\b"),
+    re.compile(r"\beu/(?:reg|dir|dec)/\d{4}/\d+\b"),
+    re.compile(r"\buk/(?:ukpga|asp|nia|wsi)/\d{4}/\d+\b"),
+    re.compile(r"\bcourtlistener:(?:opinion|cluster):\d+\b"),
+)
+
+
+def scan_text(text: str) -> list[str]:
+    """Pull autofetch-shape cite ids out of free text. Stable-dedup, in order."""
+    if not text:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for pat in _SCAN_PATTERNS:
+        for m in pat.finditer(text):
+            hit = m.group(0)
+            if hit not in seen:
+                out.append(hit)
+                seen.add(hit)
+    return out

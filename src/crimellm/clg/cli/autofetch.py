@@ -18,9 +18,12 @@ from typing import Annotated
 
 import typer
 
+from ..autofetch.circuit_breaker import CircuitBreaker
+from ..autofetch.quarantine import promote as quarantine_promote
 from ..autofetch.queue import SqliteQueue
 from ..autofetch.resolver import resolve
 from ..config import get_settings
+from ..graph.driver import get_store
 
 app = typer.Typer(help="Autofetch queue admin.", no_args_is_help=True)
 
@@ -80,6 +83,31 @@ def status(
         q.close()
     by_source: Counter[str] = Counter(p.source for p in pending)
     by_attempts: Counter[int] = Counter(p.attempts for p in pending)
+
+    # Pull breaker state for every source the queue has rows for, plus the
+    # configured default qps map so an operator sees breakers that haven't
+    # had any traffic yet too. Best-effort: missing autofetch_circuit table
+    # returns "closed" everywhere.
+    settings = get_settings()
+    circuit_path = queue_path or settings.autofetch_queue_path
+    breaker = CircuitBreaker(circuit_path)
+    try:
+        watched = set(by_source) | set(settings.autofetch_source_qps)
+        circuits: dict[str, dict[str, object]] = {}
+        for src in sorted(watched):
+            row = breaker._read(src)
+            circuits[src] = (
+                {"state": "closed", "failures": 0}
+                if row is None
+                else {
+                    "state": row["state"],
+                    "failures": row["failures"],
+                    "next_attempt_at": row["next_attempt_at"],
+                }
+            )
+    finally:
+        breaker.close()
+
     payload = {
         "pending": len(pending),
         "by_source": dict(by_source),
@@ -89,6 +117,7 @@ def status(
             for p in pending
             if p.error
         ][:10],
+        "circuits": circuits,
     }
     if fmt.lower() == "json":
         typer.echo(json.dumps(payload, indent=2))
@@ -129,8 +158,15 @@ def list_pending(
 def promote(
     cite_id: Annotated[str, typer.Argument(help="Cite id to flip validated=true.")],
 ) -> None:
-    """Mark an auto-ingested node as human-validated (Phase F wires the Neo4j MERGE)."""
-    typer.echo(f"TODO Phase F.3: flip Neo4j validated=true for {cite_id}")
+    """Mark an auto-ingested node as human-validated.
+
+    Flips ``validated=true`` on any Case / Provision / Instrument whose ``id``
+    matches the given cite. Leaves ``auto_ingested`` alone so the historical
+    fact survives — only the eval filter cares about ``validated``.
+    """
+    store = get_store()
+    n = quarantine_promote(cite_id, store=store)
+    typer.echo(f"promoted {n} node(s) for {cite_id}")
     raise typer.Exit(code=0)
 
 

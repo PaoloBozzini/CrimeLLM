@@ -24,9 +24,18 @@ stays small so it can be reasoned about + tested cheaply.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 
+# Side-effect imports register the per-jurisdiction citation parsers.
+# Without these, ``extract_all`` would return an empty list because the
+# registry would be empty when this module is imported in isolation
+# (e.g. tests that don't pull in retrieval.query).
+from ..link import cite_dk as _cite_dk  # noqa: F401
+from ..link import cite_eu as _cite_eu  # noqa: F401
+from ..link import cite_us as _cite_us  # noqa: F401
+from ..link.cite_registry import extract_all as _extract_citations
+from ..autofetch.resolver import scan_text as _scan_autofetch_shapes
 from ...common.language import detect_language
 from ..models import Jurisdiction
 
@@ -146,6 +155,11 @@ class Query:
     as_of: date
     language: str = "en"
     language_confidence: float = 0.0
+    # Canonical cite ids the parsers extracted from ``raw`` (ECLI / ELI /
+    # CELEX / neutral cite / reporter). Phase D feeds these into the
+    # autofetch miss-check so questions naming a specific provision/case
+    # trigger ingest of any node not yet in the graph.
+    citations: list[str] = field(default_factory=list)
 
     def with_overrides(
         self,
@@ -167,6 +181,7 @@ class Query:
             as_of=new_as_of,
             language=language if language is not None else self.language,
             language_confidence=self.language_confidence,
+            citations=list(self.citations),
         )
 
 
@@ -225,10 +240,28 @@ def parse_query(text: str, *, settings: object | None = None) -> Query:
 
     lang, lang_conf = detect_language(text)
 
+    # Stable-dedup canonical ids from two sources:
+    # (1) per-jurisdiction prose parsers (Ufr, ECLI, reporter triples,
+    #     statute slugs); (2) autofetch shape scanner (ELI slash-forms,
+    #     CourtListener handles) for ids users paste verbatim from URLs.
+    # Both feed into the same Query.citations list — the autofetch resolver
+    # disambiguates per-id at enqueue time.
+    seen: set[str] = set()
+    citations: list[str] = []
+    for h in _extract_citations(text):
+        if h.normalised_id and h.normalised_id not in seen:
+            citations.append(h.normalised_id)
+            seen.add(h.normalised_id)
+    for hit in _scan_autofetch_shapes(text):
+        if hit not in seen:
+            citations.append(hit)
+            seen.add(hit)
+
     return Query(
         raw=text.strip(),
         jurisdiction=inferred,
         as_of=_infer_as_of(text),
         language=lang,
         language_confidence=lang_conf,
+        citations=citations,
     )

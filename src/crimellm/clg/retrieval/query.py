@@ -53,6 +53,13 @@ def run_query(
         jurisdiction=jurisdiction, as_of=as_of, language=language
     )
 
+    # Autofetch: enqueue any canonical cite the question names that's not in
+    # the graph yet. No-op when ``autofetch_enabled`` is false. The live
+    # answer doesn't wait — the worker drains in the background.
+    from ..autofetch.integration import enqueue_missing_for_query
+
+    pending = enqueue_missing_for_query(query, store=store)
+
     seeds = seed_from_chunks(query, embedder, k=seed_k, store=store)
     expansions = expand_seeds(seeds, query=query, store=store)
     pooled = seeds + expansions
@@ -61,4 +68,7 @@ def run_query(
     flags = check_good_law(case_ids, store=store)
 
     ranked = rerank(pooled, weights=weights, today=query.as_of, good_law=flags, top_k=top_k)
-    return synthesizer.synthesise(query=query, candidates=ranked, good_law=flags)
+    answer = synthesizer.synthesise(query=query, candidates=ranked, good_law=flags)
+    if pending:
+        answer.pending_citations = list(pending)
+    return answer

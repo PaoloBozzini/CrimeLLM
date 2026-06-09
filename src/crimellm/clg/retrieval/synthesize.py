@@ -60,6 +60,11 @@ class Answer:
     jurisdiction: str | None = None
     language: str = "en"
     as_of: str = ""
+    # Citation ids the question / retrieval referenced but the graph didn't
+    # yet have. Populated by ``run_query`` when ``autofetch_enabled``; the
+    # background worker drains them. CLI / UX can surface as "ask again in
+    # N seconds for the full answer".
+    pending_citations: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -81,6 +86,7 @@ class Answer:
             "jurisdiction": self.jurisdiction,
             "language": self.language,
             "as_of": self.as_of,
+            "pending_citations": list(self.pending_citations),
         }
 
 
